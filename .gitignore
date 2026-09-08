@@ -1,0 +1,4 @@
+*.dll
+SDL3.dll
+
+x86_64-w64-mingw32/*
