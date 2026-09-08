@@ -5,8 +5,6 @@ Requirements:
 2. SDL3.dll 
 
 Compile Instructions:
-arch = `x86_64-w64-mingw32`
-`gcc -o out.exe file.c -I_arch_/include -L_arch_/lib -lSDL3`
-Copy SDL3.dll next compile binary
-`cp _arch_/bin/SDL3.dll .`
-`./out.exe`
+cmake -S . -B build -G "MinGW Makefiles"
+cmake --build build
+.\build\aero_engine_dt.exe
