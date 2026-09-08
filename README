@@ -1,1 +1,12 @@
 aero engine digital twin
+
+Requirements:
+1. SDL3-devel-3.4.16-mingw.zip (https://libsdl.org/release/SDL3-devel-3.4.16-mingw.zip)
+2. SDL3.dll 
+
+Compile Instructions:
+arch = `x86_64-w64-mingw32`
+`gcc -o out.exe file.c -I_arch_/include -L_arch_/lib -lSDL3`
+Copy SDL3.dll next compile binary
+`cp _arch_/bin/SDL3.dll .`
+`./out.exe`
