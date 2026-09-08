@@ -17,18 +17,19 @@ endif()
 # Fallback: the vendored SDL3-devel mingw kit, extracted to
 # <repo root>/x86_64-w64-mingw32 per README.md (gitignored, not committed).
 # ---------------------------------------------------------------------------
+set(SDL3_VENDOR_DIR "${CMAKE_SOURCE_DIR}/x86_64-w64-mingw32")
+
 find_package(SDL3 QUIET CONFIG)
+message(STATUS "SDL3_FOUND=${SDL3_FOUND}  SDL3_DIR=${SDL3_DIR}")
 
 if(NOT SDL3_FOUND)
-  set(SDL3_VENDOR_DIR "${CMAKE_SOURCE_DIR}/x86_64-w64-mingw32")
   if(EXISTS "${SDL3_VENDOR_DIR}/include/SDL3/SDL.h")
-    message(STATUS "Using vendored SDL3 at ${SDL3_VENDOR_DIR}")
+    message(STATUS "find_package didn't resolve SDL3 -- using vendored kit at ${SDL3_VENDOR_DIR} directly")
     add_library(SDL3::SDL3 SHARED IMPORTED)
     set_target_properties(SDL3::SDL3 PROPERTIES
       IMPORTED_IMPLIB             "${SDL3_VENDOR_DIR}/lib/libSDL3.dll.a"
       INTERFACE_INCLUDE_DIRECTORIES "${SDL3_VENDOR_DIR}/include"
     )
-    set(SDL3_DLL "${SDL3_VENDOR_DIR}/bin/SDL3.dll")
   else()
     message(FATAL_ERROR
       "SDL3 not found. Either install an SDL3 dev package (Linux) or "
@@ -36,6 +37,16 @@ if(NOT SDL3_FOUND)
       "https://libsdl.org/release/ and extract it to "
       "${SDL3_VENDOR_DIR} (see README.md).")
   endif()
+endif()
+
+# Whichever branch above resolved SDL3::SDL3 -- find_package() picking up
+# the vendored kit's own SDL3Config.cmake (e.g. via a PATH entry compile.ps1
+# added), or our manual IMPORTED-target fallback -- the DLL still needs to
+# sit next to the exe at runtime if it's *this repo's* vendored kit. Checking
+# for the file directly, rather than which branch ran, means the copy step
+# fires either way.
+if(WIN32 AND EXISTS "${SDL3_VENDOR_DIR}/bin/SDL3.dll")
+  set(SDL3_DLL "${SDL3_VENDOR_DIR}/bin/SDL3.dll")
 endif()
 
 # ---------------------------------------------------------------------------
