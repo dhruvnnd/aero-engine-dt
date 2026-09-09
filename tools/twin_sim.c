@@ -105,12 +105,104 @@ static void print_profiles(FILE *out) {
 static void usage(FILE *out, const char *argv0) {
   fprintf(out,
           "usage: %s [--profile NAME] [--dt SECONDS] [--duration SECONDS]\n"
-          "          [--load NM] [--seed N] [--sensor] [--list] [--help]\n\n"
+          "          [--load NM] [--seed N] [--sensor]\n"
+          "          [--cyl N:KEY=VAL ...] [--fault-at SECONDS]\n"
+          "          [--list] [--help]\n\n"
           "Writes a CSV engine/thermal time-series to stdout; progress and\n"
           "run parameters go to stderr. Add --sensor for the noisy sensor\n"
-          "channels alongside ground truth.\n\n",
+          "channels alongside ground truth.\n\n"
+          "--cyl sets one cylinder trim (repeatable). N is 1-based; KEY is\n"
+          "  inj   injector flow trim   (1.0 nominal)\n"
+          "  comp  compression trim     (1.0 nominal)\n"
+          "  spark spark offset, deg    (0.0 nominal, + = retard)\n"
+          "  leak  intake leak fraction (0.0 nominal, + = leaner)\n"
+          "  cool  cooling trim         (1.0 nominal, < 1 = hotter head)\n"
+          "--fault-at delays every --cyl trim until that time (default 0).\n\n",
           argv0);
   print_profiles(out);
+}
+
+typedef enum {
+  CYL_KEY_INJ,
+  CYL_KEY_COMP,
+  CYL_KEY_SPARK,
+  CYL_KEY_LEAK,
+  CYL_KEY_COOL
+} CylKey;
+
+typedef struct {
+  int cyl0; /* 0-based cylinder index */
+  CylKey key;
+  double value;
+} CylFault;
+
+#define MAX_CYL_FAULTS 16
+static CylFault g_faults[MAX_CYL_FAULTS];
+static int g_nfaults;
+
+/* Parses "N:KEY=VAL" and appends it to g_faults. Returns 0 on success. */
+static int parse_cyl_fault(const char *spec) {
+  const char *colon = strchr(spec, ':');
+  const char *eq = colon ? strchr(colon, '=') : NULL;
+  if (!colon || !eq || g_nfaults >= MAX_CYL_FAULTS) {
+    return -1;
+  }
+  int cyl = atoi(spec);
+  if (cyl < 1 || cyl > ENGINE_MAX_CYLINDERS) {
+    return -1;
+  }
+
+  char key[16] = {0};
+  size_t klen = (size_t)(eq - colon - 1);
+  if (klen == 0 || klen >= sizeof(key)) {
+    return -1;
+  }
+  memcpy(key, colon + 1, klen);
+
+  CylKey k;
+  if (!strcmp(key, "inj")) {
+    k = CYL_KEY_INJ;
+  } else if (!strcmp(key, "comp")) {
+    k = CYL_KEY_COMP;
+  } else if (!strcmp(key, "spark")) {
+    k = CYL_KEY_SPARK;
+  } else if (!strcmp(key, "leak")) {
+    k = CYL_KEY_LEAK;
+  } else if (!strcmp(key, "cool")) {
+    k = CYL_KEY_COOL;
+  } else {
+    return -1;
+  }
+
+  g_faults[g_nfaults].cyl0 = cyl - 1;
+  g_faults[g_nfaults].key = k;
+  g_faults[g_nfaults].value = atof(eq + 1);
+  g_nfaults++;
+  return 0;
+}
+
+static void apply_cyl_faults(ModelSync *sync) {
+  for (int i = 0; i < g_nfaults; i++) {
+    CylinderConfig *c = &sync->cyl_config[g_faults[i].cyl0];
+    double v = g_faults[i].value;
+    switch (g_faults[i].key) {
+      case CYL_KEY_INJ:
+        c->injector_flow_trim = v;
+        break;
+      case CYL_KEY_COMP:
+        c->compression_trim = v;
+        break;
+      case CYL_KEY_SPARK:
+        c->spark_offset_deg = v;
+        break;
+      case CYL_KEY_LEAK:
+        c->intake_leak_frac = v;
+        break;
+      case CYL_KEY_COOL:
+        c->cooling_trim = v;
+        break;
+    }
+  }
 }
 
 int main(int argc, char **argv) {
@@ -120,6 +212,7 @@ int main(int argc, char **argv) {
   double load_nm = 40.0;
   uint32_t seed = 1u;
   int with_sensor = 0;
+  double fault_at_s = 0.0;
 
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
@@ -135,6 +228,14 @@ int main(int argc, char **argv) {
       seed = (uint32_t)strtoul(argv[++i], NULL, 10);
     } else if (!strcmp(a, "--sensor")) {
       with_sensor = 1;
+    } else if (!strcmp(a, "--cyl") && i + 1 < argc) {
+      if (parse_cyl_fault(argv[++i]) != 0) {
+        fprintf(stderr, "twin_sim: bad --cyl spec: %s\n\n", argv[i]);
+        usage(stderr, argv[0]);
+        return 2;
+      }
+    } else if (!strcmp(a, "--fault-at") && i + 1 < argc) {
+      fault_at_s = atof(argv[++i]);
     } else if (!strcmp(a, "--list")) {
       print_profiles(stdout);
       return 0;
@@ -177,9 +278,15 @@ int main(int argc, char **argv) {
   sensor_init(&sensor, &scfg, seed);
 
   fprintf(stderr,
-          "# twin_sim profile=%s dt=%.4f duration=%.1f load=%.1f seed=%u%s\n",
+          "# twin_sim profile=%s dt=%.4f duration=%.1f load=%.1f seed=%u%s",
           profile->name, dt, duration_s, load_nm, seed,
           with_sensor ? " +sensor" : "");
+  if (g_nfaults > 0) {
+    fprintf(stderr, " faults=%d@%.0fs", g_nfaults, fault_at_s);
+  }
+  fprintf(stderr, "\n");
+
+  int faults_applied = (g_nfaults == 0);
 
   int nchan = 0;
   const ModelChannel *chans = model_channels(&nchan);
@@ -197,6 +304,11 @@ int main(int argc, char **argv) {
   long nsteps = (long)(duration_s / dt + 0.5);
   for (long i = 0; i <= nsteps; i++) {
     double t = (double)i * dt;
+
+    if (!faults_applied && t >= fault_at_s) {
+      apply_cyl_faults(&sync);
+      faults_applied = 1;
+    }
 
     double alt_m = profile->altitude_m(t);
     AtmosphereState atm = environment_isa(alt_m);
