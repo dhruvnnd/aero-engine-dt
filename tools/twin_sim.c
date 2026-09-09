@@ -23,6 +23,7 @@
 
 #include "physics/environment.h"
 #include "telemetry/sensor.h"
+#include "model/channels.h"
 #include "model/sync.h"
 #include "model/state.h"
 
@@ -180,7 +181,13 @@ int main(int argc, char **argv) {
           profile->name, dt, duration_s, load_nm, seed,
           with_sensor ? " +sensor" : "");
 
-  printf("t,throttle,alt_m,ambient_c,rpm,map_kpa,torque_nm,cht_c,egt_c,oil_c");
+  int nchan = 0;
+  const ModelChannel *chans = model_channels(&nchan);
+
+  printf("t,throttle,alt_m,ambient_c");
+  for (int c = 0; c < nchan; c++) {
+    printf(",%s", chans[c].name);
+  }
   if (with_sensor) {
     printf(",s_rpm,s_rpm_ok,s_map_kpa,s_map_ok,s_cht_c,s_cht_ok,"
            "s_egt_c,s_egt_ok,s_oil_c,s_oil_ok");
@@ -196,9 +203,10 @@ int main(int argc, char **argv) {
     double ambient_c = (atm.temperature_k - 273.15) + profile->ambient_offset_c;
     double throttle = profile->throttle(t);
 
-    printf("%.3f,%.4f,%.1f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f", t, throttle,
-           alt_m, ambient_c, st.rpm, st.engine.map_kpa, st.torque_nm,
-           st.thermal.cht_c, st.thermal.egt_c, st.thermal.oil_temp_c);
+    printf("%.3f,%.4f,%.1f,%.2f", t, throttle, alt_m, ambient_c);
+    for (int c = 0; c < nchan; c++) {
+      printf(",%.*f", chans[c].precision, chans[c].get(&st, chans[c].index));
+    }
 
     if (with_sensor) {
       SensorReading r = sensor_read(&sensor, &st);
