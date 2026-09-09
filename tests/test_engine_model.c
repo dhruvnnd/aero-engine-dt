@@ -1,6 +1,7 @@
 #include "test_util.h"
 
 #include "math/units.h"
+#include "physics/cylinder.h"
 #include "physics/engine_model.h"
 #include "physics/environment.h"
 
@@ -14,9 +15,13 @@ static EngineInput make_input(double throttle, double load, double amb_kpa) {
 
 static void run(EngineState *st, const EngineConfig *cfg, const EngineInput *in,
                 double duration_s, double dt) {
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    cyl[i] = cylinder_config_default();
+  }
   int n = (int)(duration_s / dt + 0.5);
   for (int i = 0; i < n; i++) {
-    engine_model_step(st, cfg, in, i * dt, dt);
+    engine_model_step(st, cfg, in, cyl, i * dt, dt);
   }
 }
 

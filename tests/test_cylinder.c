@@ -139,6 +139,59 @@ static void test_lean_leak_triggers_misfire(void) {
   CHECK_NEAR(st.cyl[0].misfire_rate, 0.0, 0.0);
 }
 
+/* nominal-trim sum equals the lumped formula the readout uses */
+static void test_nominal_torque_matches_lumped(void) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  run(&sync, &st, 40.0);
+  CHECK_NEAR(st.torque_nm, engine_model_torque_nm(&st.engine), 1e-9);
+}
+
+/* One cylinder driven into misfire: the engine can't hold RPM, torque_nm
+ * dips, and the dead cylinder flags misfire_rate 1. */
+static void test_dead_cylinder_drops_rpm(void) {
+  ModelSync healthy, faulted;
+  model_sync_init(&healthy);
+  model_sync_init(&faulted);
+  faulted.cyl_config[2].intake_leak_frac = 0.7; /* lambda ~1.7 -> full misfire */
+
+  ModelState hs, fs;
+  model_state_init(&hs, &healthy.engine_config, 15.0);
+  model_state_init(&fs, &faulted.engine_config, 15.0);
+  run(&healthy, &hs, 90.0);
+  run(&faulted, &fs, 90.0);
+
+  CHECK(fs.rpm < 0.92 * hs.rpm);              /* clear RPM loss */
+  CHECK(fs.torque_nm < hs.torque_nm);         /* torque dips (friction term) */
+  CHECK(fs.torque_nm > 0.80 * hs.torque_nm);  /* load + friction still dominate */
+  CHECK_NEAR(fs.cyl[2].misfire_rate, 1.0, 0.0);
+}
+
+/* A low-compression cylinder cuts output, but less than a full misfire and
+ * without flagging as one. */
+static void test_weak_cylinder_partial_loss(void) {
+  ModelSync healthy, weak, dead;
+  model_sync_init(&healthy);
+  model_sync_init(&weak);
+  model_sync_init(&dead);
+  weak.cyl_config[1].compression_trim = 0.5;
+  dead.cyl_config[1].intake_leak_frac = 0.7;
+
+  ModelState hs, ws, ds;
+  model_state_init(&hs, &healthy.engine_config, 15.0);
+  model_state_init(&ws, &weak.engine_config, 15.0);
+  model_state_init(&ds, &dead.engine_config, 15.0);
+  run(&healthy, &hs, 90.0);
+  run(&weak, &ws, 90.0);
+  run(&dead, &ds, 90.0);
+
+  CHECK(ws.rpm < hs.rpm);          /* worse than healthy... */
+  CHECK(ws.rpm > ds.rpm);          /* ...but better than a dead cylinder */
+  CHECK_NEAR(ws.cyl[1].misfire_rate, 0.0, 0.0);
+}
+
 static const TestCase CASES[] = {
     {"cylinder.config_default_is_nominal", test_config_default_is_nominal},
     {"cylinder.state_init_cold_start", test_state_init_cold_start},
@@ -150,6 +203,10 @@ static const TestCase CASES[] = {
     {"cylinder.spark_retard_raises_egt", test_spark_retard_raises_egt},
     {"cylinder.misfire_zero_at_nominal", test_misfire_zero_at_nominal},
     {"cylinder.lean_leak_triggers_misfire", test_lean_leak_triggers_misfire},
+    {"cylinder.nominal_torque_matches_lumped",
+     test_nominal_torque_matches_lumped},
+    {"cylinder.dead_cylinder_drops_rpm", test_dead_cylinder_drops_rpm},
+    {"cylinder.weak_cylinder_partial_loss", test_weak_cylinder_partial_loss},
 };
 
 RUN_TESTS(CASES)
