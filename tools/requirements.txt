@@ -1,0 +1,4 @@
+# Dev-only: dependencies for tools/plot_run.py (plots twin_sim CSV output).
+# Not needed to build, test, or run the project itself.
+#   pip install -r tools/requirements.txt
+matplotlib>=3.5
