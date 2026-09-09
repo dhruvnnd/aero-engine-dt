@@ -7,6 +7,9 @@
 void model_sync_init(ModelSync *sync) {
   sync->engine_config = engine_config_default();
   sync->thermal_config = thermal_config_default();
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    sync->cyl_config[i] = cylinder_config_default();
+  }
   sync->sim_time_s = 0.0;
 }
 
