@@ -1,6 +1,7 @@
 #include "model/sync.h"
 
 #include "physics/combustion.h"
+#include "physics/cylinder.h"
 #include "physics/engine_model.h"
 #include "physics/thermal.h"
 
@@ -13,19 +14,27 @@ void model_sync_init(ModelSync *sync) {
   sync->sim_time_s = 0.0;
 }
 
-void model_sync_step(ModelSync *sync, ModelState *state, const EngineInput *input,
-                     double ambient_temp_c, double dt) {
+void model_sync_step(ModelSync *sync, ModelState *state,
+                     const EngineInput *input, double ambient_temp_c,
+                     double dt) {
   engine_model_step(&state->engine, &sync->engine_config, input,
                     sync->sim_time_s, dt);
 
   /* Heat into the thermal model is whatever the current (post-step)
    * operating point releases; at frame-scale dt the half-step lag versus
    * evaluating it at the pre-step point is negligible. */
-  double waste_heat_w = combustion_waste_heat_w(state->engine.map_kpa,
-                                                state->engine.omega_rad_s);
+  double waste_heat_w =
+      combustion_waste_heat_w(state->engine.map_kpa, state->engine.omega_rad_s);
 
   thermal_step(&state->thermal, &sync->thermal_config, waste_heat_w,
                ambient_temp_c, sync->sim_time_s, dt);
+
+  for (int i = 0; i < sync->engine_config.num_cylinders; i++) {
+    cylinder_step(&state->cyl[i], &sync->cyl_config[i], state->engine.map_kpa,
+                  state->engine.omega_rad_s, ambient_temp_c,
+                  &sync->thermal_config, sync->engine_config.num_cylinders,
+                  sync->sim_time_s, dt);
+  }
 
   sync->sim_time_s += dt;
 
