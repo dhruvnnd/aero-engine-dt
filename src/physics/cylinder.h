@@ -1,6 +1,8 @@
 #ifndef PHYSICS_CYLINDER_H
 #define PHYSICS_CYLINDER_H
 
+#include "physics/thermal.h"
+
 /* Per-cylinder overlay on the lumped engine model. */
 
 typedef struct {
@@ -27,5 +29,13 @@ CylinderConfig cylinder_config_default(void);
 /* Cold start: temperatures at ambient, lambda stoichiometric, every other
  * output zero. */
 void cylinder_state_init(CylinderState *state, double ambient_temp_c);
+
+/* Advances this cylinder's cht_c and egt_c nodes by dt and refreshes its
+ * algebraic outputs (lambda, imep_bar, fuel_pw_ms, ca50_deg, misfire_rate).
+ */
+void cylinder_step(CylinderState *state, const CylinderConfig *config,
+                   double map_kpa, double omega_rad_s, double ambient_c,
+                   const ThermalConfig *thermal_cfg, int num_cylinders,
+                   double t, double dt);
 
 #endif /* PHYSICS_CYLINDER_H */
