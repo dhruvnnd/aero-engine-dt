@@ -21,7 +21,9 @@ Build:
 Usage:
 
   twin_sim [--profile NAME] [--dt SECONDS] [--duration SECONDS]
-           [--load NM] [--seed N] [--sensor] [--list] [--help]
+           [--load NM] [--seed N] [--sensor]
+           [--cyl N:KEY=VAL ...] [--fault-at SECONDS]
+           [--list] [--help]
 
   --profile NAME   mission profile (default: idle). -p also works.
   --dt SECONDS     integration step and CSV row spacing (default: 0.02)
@@ -29,6 +31,13 @@ Usage:
   --load NM        constant external load torque, N*m (default: 40)
   --seed N         RNG seed for the --sensor noise stream (default: 1)
   --sensor         add 10 noisy sensor columns next to ground truth
+  --cyl N:KEY=VAL  set one trim on cylinder N (1-based); repeatable. KEY:
+                     inj    injector flow trim   (1.0 nominal)
+                     comp   compression trim     (1.0 nominal)
+                     spark  spark offset, deg    (0.0 nominal, + = retard)
+                     leak   intake leak fraction (0.0 nominal, + = leaner)
+                     cool   cooling trim         (1.0 nominal, <1 = hotter)
+  --fault-at SEC   hold every --cyl trim until this time (default 0)
   --list           print the profile list and exit
   --help           print usage and exit
 
@@ -49,9 +58,15 @@ Columns:
   rpm        crank speed
   map_kpa    manifold absolute pressure, kPa
   torque_nm  indicated torque, N*m
-  cht_c      cylinder head temperature, deg C
-  egt_c      exhaust gas temperature, deg C
+  cht_c      cylinder head temperature, deg C (engine-wide, lumped)
+  egt_c      exhaust gas temperature, deg C (engine-wide, lumped)
   oil_c      oil temperature, deg C
+  cht_c_1..4 per-cylinder head temperature, deg C
+  egt_c_1..4 per-cylinder exhaust gas temperature, deg C
+
+At nominal trims the per-cylinder columns equal the lumped cht_c / egt_c.
+Use --cyl to make a cylinder diverge; plot_run then shows "cyl CHT" /
+"cyl EGT" panels automatically.
 
 With --sensor, each of rpm, map, cht, egt, oil also gets a noisy value
 column and an _ok flag (1 valid, 0 dropped; value is 0 when dropped):
@@ -66,6 +81,8 @@ Examples:
   twin_sim --list
   twin_sim --profile cruise-climb > runs/cc.csv
   twin_sim -p rapid-throttle --sensor --dt 0.01 --duration 90 > runs/rt.csv
+  twin_sim -p takeoff --duration 120 --cyl 3:leak=0.35 --cyl 2:cool=0.82 \
+           --fault-at 45 > runs/fault.csv
 
 
 plot_run.py
