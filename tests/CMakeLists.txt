@@ -11,6 +11,7 @@ set(ENGINE_CORE_TESTS
   test_thermal
   test_model_sync
   test_sensor
+  test_channels
 )
 
 foreach(test_name IN LISTS ENGINE_CORE_TESTS)
