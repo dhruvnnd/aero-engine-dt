@@ -3,11 +3,13 @@
 #include "physics/combustion.h"
 #include "physics/cylinder.h"
 #include "physics/engine_model.h"
+#include "physics/fuel.h"
 #include "physics/thermal.h"
 
 void model_sync_init(ModelSync *sync) {
   sync->engine_config = engine_config_default();
   sync->thermal_config = thermal_config_default();
+  sync->fuel_config = fuel_config_default();
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     sync->cyl_config[i] = cylinder_config_default();
   }
@@ -43,4 +45,10 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   state->torque_nm = cylinders_total_torque_nm(
       sync->cyl_config, sync->engine_config.num_cylinders,
       state->engine.map_kpa, state->engine.omega_rad_s);
+
+  /* Fuel path reads the settled operating point (rpm just refreshed above);
+   * intake temp is the ambient proxy until MAT lands. */
+  fuel_step(&state->fuel, &sync->fuel_config, sync->cyl_config,
+            sync->engine_config.num_cylinders, state->engine.map_kpa,
+            state->rpm, ambient_temp_c);
 }
