@@ -14,21 +14,15 @@ typedef struct {
   double cht_tau_s;
   double egt_tau_s;
   double oil_tau_s;
+  double cht_gain_c_per_w;
+  double egt_gain_c_per_w;
+  double oil_gain_c_per_w;
 } ThermalDerivParams;
 
-static double cht_target_c(double waste_heat_w, double ambient_temp_c) {
-  const double k_cht_c_per_w = 0.008;
-  return ambient_temp_c + k_cht_c_per_w * waste_heat_w;
-}
-
-static double egt_target_c(double waste_heat_w, double ambient_temp_c) {
-  const double k_egt_c_per_w = 0.035;
-  return ambient_temp_c + k_egt_c_per_w * waste_heat_w;
-}
-
-static double oil_target_c(double waste_heat_w, double ambient_temp_c) {
-  const double k_oil_c_per_w = 0.004;
-  return ambient_temp_c + k_oil_c_per_w * waste_heat_w;
+/* First-order target: ambient plus a linear rise with waste heat. */
+static double node_target_c(double gain_c_per_w, double waste_heat_w,
+                            double ambient_temp_c) {
+  return ambient_temp_c + gain_c_per_w * waste_heat_w;
 }
 
 static void thermal_derivative(const double *state, double *dstate, double t,
@@ -41,11 +35,17 @@ static void thermal_derivative(const double *state, double *dstate, double t,
   double oil = state[THERMAL_STATE_OIL];
 
   dstate[THERMAL_STATE_CHT] =
-      (cht_target_c(p->waste_heat_w, p->ambient_temp_c) - cht) / p->cht_tau_s;
+      (node_target_c(p->cht_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
+       cht) /
+      p->cht_tau_s;
   dstate[THERMAL_STATE_EGT] =
-      (egt_target_c(p->waste_heat_w, p->ambient_temp_c) - egt) / p->egt_tau_s;
+      (node_target_c(p->egt_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
+       egt) /
+      p->egt_tau_s;
   dstate[THERMAL_STATE_OIL] =
-      (oil_target_c(p->waste_heat_w, p->ambient_temp_c) - oil) / p->oil_tau_s;
+      (node_target_c(p->oil_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
+       oil) /
+      p->oil_tau_s;
 }
 
 ThermalConfig thermal_config_default(void) {
@@ -53,6 +53,9 @@ ThermalConfig thermal_config_default(void) {
   cfg.cht_tau_s = 90.0;  /* metal head: moderate thermal mass */
   cfg.egt_tau_s = 5.0;   /* exhaust gas: responds almost immediately */
   cfg.oil_tau_s = 240.0; /* oil sump: large thermal mass, slowest to move */
+  cfg.cht_gain_c_per_w = 0.008;
+  cfg.egt_gain_c_per_w = 0.035;
+  cfg.oil_gain_c_per_w = 0.004;
   return cfg;
 }
 
@@ -74,6 +77,9 @@ void thermal_step(ThermalState *state, const ThermalConfig *config,
   params.cht_tau_s = config->cht_tau_s;
   params.egt_tau_s = config->egt_tau_s;
   params.oil_tau_s = config->oil_tau_s;
+  params.cht_gain_c_per_w = config->cht_gain_c_per_w;
+  params.egt_gain_c_per_w = config->egt_gain_c_per_w;
+  params.oil_gain_c_per_w = config->oil_gain_c_per_w;
 
   integrator_rk4_step(vec, THERMAL_STATE_COUNT, t, dt, thermal_derivative,
                       &params);

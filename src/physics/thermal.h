@@ -11,6 +11,10 @@ typedef struct {
   double cht_tau_s;
   double egt_tau_s;
   double oil_tau_s;
+
+  double cht_gain_c_per_w;
+  double egt_gain_c_per_w;
+  double oil_gain_c_per_w;
 } ThermalConfig;
 
 ThermalConfig thermal_config_default(void);
