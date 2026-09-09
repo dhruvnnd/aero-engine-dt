@@ -54,6 +54,16 @@ EngineConfig engine_config_default(void) {
   cfg.inertia_kg_m2 = 0.6;
   cfg.map_tau_s = 0.25;
   cfg.friction_coeff_nm_per_rad_s = 0.12;
+
+  /* Inline-four, 1-3-4-2 firing order */
+  cfg.num_cylinders = 4;
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    cfg.firing_order[i] = 0;
+  }
+  cfg.firing_order[0] = 1;
+  cfg.firing_order[1] = 3;
+  cfg.firing_order[2] = 4;
+  cfg.firing_order[3] = 2;
   return cfg;
 }
 

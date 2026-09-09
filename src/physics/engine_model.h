@@ -8,6 +8,8 @@
  * physics/environment.h and is passed in via EngineInput since it changes
  * with altitude during a mission, not a fixed engine parameter. */
 
+#define ENGINE_MAX_CYLINDERS 6
+
 typedef struct {
   double omega_rad_s; /* crank angular velocity */
   double map_kpa;     /* manifold absolute pressure */
@@ -23,6 +25,12 @@ typedef struct {
   double inertia_kg_m2;               /* effective rotating inertia */
   double map_tau_s;                   /* manifold filling time constant, s */
   double friction_coeff_nm_per_rad_s; /* simple viscous friction coefficient */
+
+  /* Engine geometry. num_cylinders is the active count (<=
+   * ENGINE_MAX_CYLINDERS); firing_order lists 1-based cylinder numbers in the
+   * order they fire, with unused trailing slots left 0. */
+  int num_cylinders;
+  int firing_order[ENGINE_MAX_CYLINDERS];
 } EngineConfig;
 
 /* Plausible placeholder parameters for a small aero piston engine, to use
