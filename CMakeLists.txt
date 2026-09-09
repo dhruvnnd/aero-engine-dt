@@ -50,7 +50,7 @@ if(WIN32 AND EXISTS "${SDL3_VENDOR_DIR}/bin/SDL3.dll")
 endif()
 
 # ---------------------------------------------------------------------------
-# twin_core: math/physics/telemetry/health/ml/mission/twin/data/util.
+# engine_core: math/physics/telemetry/health/ml/mission/model/data/util.
 # Pure C, no SDL dependency by convention -- this is what tests/ links
 # against so the physics model is testable headless.
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/src/math/*.c"
   "${CMAKE_SOURCE_DIR}/src/physics/*.c"
   "${CMAKE_SOURCE_DIR}/src/telemetry/*.c"
-  "${CMAKE_SOURCE_DIR}/src/twin/*.c"
+  "${CMAKE_SOURCE_DIR}/src/model/*.c"
   "${CMAKE_SOURCE_DIR}/src/health/*.c"
   "${CMAKE_SOURCE_DIR}/src/ml/*.c"
   "${CMAKE_SOURCE_DIR}/src/mission/*.c"
@@ -67,16 +67,16 @@ file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
 )
 
 if(CORE_SOURCES)
-  add_library(twin_core STATIC ${CORE_SOURCES})
-  target_include_directories(twin_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
-  target_compile_options(twin_core PRIVATE -Wall -Wextra)
+  add_library(engine_core STATIC ${CORE_SOURCES})
+  target_include_directories(engine_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+  target_compile_options(engine_core PRIVATE -Wall -Wextra)
 else()
   # Nothing under those directories yet -- keep the target valid so the
   # rest of the build still links cleanly while the project is scaffolded.
   # (INTERFACE targets can't take PRIVATE compile options, so this branch
   # just skips warning flags until there's actually a .c file to apply them to.)
-  add_library(twin_core INTERFACE)
-  target_include_directories(twin_core INTERFACE ${CMAKE_SOURCE_DIR}/src)
+  add_library(engine_core INTERFACE)
+  target_include_directories(engine_core INTERFACE ${CMAKE_SOURCE_DIR}/src)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ list(APPEND APP_SOURCES "${CMAKE_SOURCE_DIR}/src/main.c")
 add_executable(aero_engine_dt ${APP_SOURCES})
 
 target_include_directories(aero_engine_dt PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(aero_engine_dt PRIVATE twin_core SDL3::SDL3)
+target_link_libraries(aero_engine_dt PRIVATE engine_core SDL3::SDL3)
 
 target_compile_options(aero_engine_dt PRIVATE
   -Wall -Wextra
@@ -109,6 +109,22 @@ if(WIN32 AND DEFINED SDL3_DLL)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${SDL3_DLL}" "$<TARGET_FILE_DIR:aero_engine_dt>"
     COMMENT "Copying SDL3.dll next to the executable"
+  )
+endif()
+
+# ---------------------------------------------------------------------------
+# twin_sim: headless CSV sim-runner. Links engine_core only (no SDL). Steps
+# the twin over a scripted throttle/altitude profile and writes a CSV
+# time-series to stdout -- for plotting and mission-profile experiments
+# without the dashboard.
+# ---------------------------------------------------------------------------
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/twin_sim.c")
+  add_executable(twin_sim "${CMAKE_SOURCE_DIR}/tools/twin_sim.c")
+  target_link_libraries(twin_sim PRIVATE engine_core)
+  target_compile_options(twin_sim PRIVATE
+    -Wall -Wextra
+    $<$<CONFIG:Debug>:-g -O0>
+    $<$<CONFIG:Release>:-O2>
   )
 endif()
 
