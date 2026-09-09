@@ -5,3 +5,5 @@ x86_64-w64-mingw32/*
 *.o
 *.exe
 build/*
+runs/*
+tools/__pycache__/*
