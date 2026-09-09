@@ -13,6 +13,7 @@ set(ENGINE_CORE_TESTS
   test_sensor
   test_channels
   test_cylinder
+  test_fuel
 )
 
 foreach(test_name IN LISTS ENGINE_CORE_TESTS)
