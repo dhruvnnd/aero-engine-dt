@@ -137,6 +137,27 @@ def is_flat(values, tol=1e-6):
     return not fin or (max(fin) - min(fin)) <= tol
 
 
+def cyl_group(cols, base):
+    """Sorted per-cylinder column names for `base` (e.g. cht_c_1, cht_c_2...)."""
+    found = []
+    for name in cols:
+        if name.startswith(base + "_"):
+            tail = name[len(base) + 1:]
+            if tail.isdigit():
+                found.append((int(tail), name))
+    return [name for _, name in sorted(found)]
+
+
+def group_spread(cols, names):
+    """Largest max-min across the named columns at any single sample."""
+    worst = 0.0
+    for row in zip(*(cols[n] for n in names)):
+        finite = [v for v in row if v == v]
+        if finite:
+            worst = max(worst, max(finite) - min(finite))
+    return worst
+
+
 def masked_sensor(values, ok):
     """Sensor series with dropped samples (ok == 0) blanked to NaN."""
     return [float("nan") if k < 0.5 else v for v, k in zip(values, ok)]
@@ -169,13 +190,25 @@ def render(plt, cols, header, args):
                     is_flat(cols[c]) for c, _ in present):
                 continue
             panels.append((ylabel, present))
+
+        # Per-cylinder panels, shown only when the cylinders actually
+        # disagree (a fault run). The lumped column rides along as a
+        # dashed reference.
+        for base, label in (("cht_c", "cyl CHT (°C)"), ("egt_c", "cyl EGT (°C)")):
+            grp = cyl_group(cols, base)
+            if len(grp) >= 2 and group_spread(cols, grp) > 1.0:
+                entries = [(c, "left") for c in grp]
+                if base in cols:
+                    entries.append((base, "left"))
+                panels.append((label, entries))
+
         if not panels:
             sys.exit("plot_run: none of the expected columns are present; "
                      "use --y COL ...")
 
     n = len(panels)
-    fig, axes = plt.subplots(n, 1, sharex=True,
-                             figsize=(args.width, args.height))
+    fig_h = max(args.height, 2.0 * n)  # ~2 in per panel once past ~4
+    fig, axes = plt.subplots(n, 1, sharex=True, figsize=(args.width, fig_h))
     if n == 1:
         axes = [axes]
 
@@ -191,7 +224,9 @@ def render(plt, cols, header, args):
             # Colour every series explicitly -- a twin axis otherwise
             # restarts matplotlib's cycle and collides with the left axis.
             color = palette[ci % len(palette)]
-            extra = {"linestyle": "--", "alpha": 0.7} if col == "ambient_c" else {}
+            is_ref = col == "ambient_c" or (
+                ylabel.startswith("cyl ") and col in ("cht_c", "egt_c"))
+            extra = {"linestyle": "--", "alpha": 0.7} if is_ref else {}
             target.plot(t, cols[col], label=col, color=color, linewidth=1.3,
                         **extra)
             if args.sensor and col in SENSOR_MAP:
@@ -200,7 +235,7 @@ def render(plt, cols, header, args):
                     target.plot(t, masked_sensor(cols[sval], cols[sok]),
                                 label=f"{col} (sensor)", color=color,
                                 linewidth=0.7, alpha=0.4)
-            if col in ("cht_c", "egt_c") and not explicit:
+            if col in ("cht_c", "egt_c") and not explicit and not is_ref:
                 hi, idx = series_max(cols[col])
                 near_end = t[idx] > 0.75 * t[-1]
                 target.plot([t[idx]], [hi], marker="v", markersize=5, color=color)
