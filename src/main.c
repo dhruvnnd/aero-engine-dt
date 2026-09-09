@@ -2,6 +2,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include "platform/sdl/sdl_text.h"
 #include "platform/sdl/sdl_time.h"
 #include "platform/sdl/sdl_window.h"
 
@@ -46,15 +47,23 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   SDL_SetRenderDrawColor(renderer, 20, 40, 80, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
-
-  SDL_RenderDebugText(renderer, 10, 10, "Aero Engine DT | Simulator Running");
+  const SDL_Color white = {255, 255, 255, SDL_ALPHA_OPAQUE};
+  const SDL_Color amber = {255, 200, 80, SDL_ALPHA_OPAQUE};
 
   const Uint64 ticks = SDL_GetTicks();
-  SDL_RenderDebugTextFormat(renderer, 10, 30, "Time: %.2f seconds",
-                            (double)ticks / 1000.0);
+  const int ver = SDL_GetVersion();
 
-  SDL_RenderDebugTextFormat(renderer, 10, 40, "FPS: %.2f", (double)fps);
+  sdl_text_draw(renderer, SDL_TEXT_ANCHOR_TOP_LEFT, 0, white,
+                "Aero Engine DT | Simulator Running");
+  sdl_text_draw(renderer, SDL_TEXT_ANCHOR_TOP_LEFT, 1, white,
+                "Time: %.2f seconds", (double)ticks / 1000.0);
+
+  sdl_text_draw(renderer, SDL_TEXT_ANCHOR_TOP_RIGHT, 0, amber, "FPS: %.1f",
+                (double)fps);
+
+  sdl_text_draw(renderer, SDL_TEXT_ANCHOR_BOTTOM_LEFT, 0, white,
+                "SDL %d.%d.%d", SDL_VERSIONNUM_MAJOR(ver),
+                SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver));
 
   SDL_RenderPresent(renderer);
 
