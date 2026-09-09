@@ -4,6 +4,7 @@ void model_state_init(ModelState *state, const EngineConfig *engine_config,
                       double ambient_temp_c) {
   engine_model_init(&state->engine, engine_config);
   thermal_init(&state->thermal, ambient_temp_c);
+  fuel_state_init(&state->fuel);
 
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     if (i < engine_config->num_cylinders) {
