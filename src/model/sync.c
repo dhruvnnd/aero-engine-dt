@@ -18,7 +18,7 @@ void model_sync_step(ModelSync *sync, ModelState *state,
                      const EngineInput *input, double ambient_temp_c,
                      double dt) {
   engine_model_step(&state->engine, &sync->engine_config, input,
-                    sync->sim_time_s, dt);
+                    sync->cyl_config, sync->sim_time_s, dt);
 
   /* Heat into the thermal model is whatever the current (post-step)
    * operating point releases; at frame-scale dt the half-step lag versus
@@ -39,4 +39,8 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   sync->sim_time_s += dt;
 
   model_state_refresh_derived(state);
+
+  state->torque_nm = cylinders_total_torque_nm(
+      sync->cyl_config, sync->engine_config.num_cylinders,
+      state->engine.map_kpa, state->engine.omega_rad_s);
 }
