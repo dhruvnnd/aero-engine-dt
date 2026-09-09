@@ -17,6 +17,8 @@ typedef struct {
   double inertia_kg_m2;
   double map_tau_s;
   double friction_coeff_nm_per_rad_s;
+  const CylinderConfig *cylinders;
+  int num_cylinders;
 } EngineDerivParams;
 
 static double map_target_kpa(double throttle, double ambient_pressure_kpa) {
@@ -39,7 +41,8 @@ static void engine_derivative(const double *state, double *dstate, double t,
   double omega = state[ENGINE_STATE_OMEGA];
   double map_kpa = state[ENGINE_STATE_MAP];
 
-  double torque_indicated = combustion_indicated_torque_nm(map_kpa, omega);
+  double torque_indicated = cylinders_total_torque_nm(
+      p->cylinders, p->num_cylinders, map_kpa, omega);
   double torque_friction = p->friction_coeff_nm_per_rad_s * omega;
   double torque_net = torque_indicated - torque_friction - p->load_torque_nm;
 
@@ -74,7 +77,8 @@ void engine_model_init(EngineState *state, const EngineConfig *config) {
 }
 
 void engine_model_step(EngineState *state, const EngineConfig *config,
-                       const EngineInput *input, double t, double dt) {
+                       const EngineInput *input,
+                       const CylinderConfig *cylinders, double t, double dt) {
   double vec[ENGINE_STATE_COUNT] = {state->omega_rad_s, state->map_kpa};
 
   EngineDerivParams params;
@@ -84,6 +88,8 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
   params.inertia_kg_m2 = config->inertia_kg_m2;
   params.map_tau_s = config->map_tau_s;
   params.friction_coeff_nm_per_rad_s = config->friction_coeff_nm_per_rad_s;
+  params.cylinders = cylinders;
+  params.num_cylinders = config->num_cylinders;
 
   integrator_rk4_step(vec, ENGINE_STATE_COUNT, t, dt, engine_derivative,
                       &params);

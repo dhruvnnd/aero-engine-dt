@@ -3,10 +3,13 @@
 
 /* Minimal lumped-parameter model of a piston engine's rotating and intake
  * dynamics: crank angular velocity and manifold pressure, both carried as
- * ODE state. Indicated torque comes from physics/combustion.h; ambient
- * pressure (which sets how high MAP can actually reach) comes from
- * physics/environment.h and is passed in via EngineInput since it changes
- * with altitude during a mission, not a fixed engine parameter. */
+ * ODE state. Indicated torque is the sum of per-cylinder contributions
+ * (physics/cylinder.h); ambient pressure (which sets how high MAP can
+ * actually reach) comes from physics/environment.h and is passed in via
+ * EngineInput since it changes with altitude during a mission, not a fixed
+ * engine parameter. */
+
+#include "physics/cylinder.h"
 
 #define ENGINE_MAX_CYLINDERS 6
 
@@ -42,13 +45,16 @@ EngineConfig engine_config_default(void);
 /* Sets state to a cold-idle starting point. */
 void engine_model_init(EngineState *state, const EngineConfig *config);
 
-/* Advances state by dt seconds under the given input, using RK4
- * t is the current simulation time in seconds
- */
+/* Advances state by dt seconds under the given input, using RK4.
+ * `cylinders` is an array of at least config->num_cylinders entries; crank
+ * torque is their summed contribution. `t` is the current sim time, s. */
 void engine_model_step(EngineState *state, const EngineConfig *config,
-                       const EngineInput *input, double t, double dt);
+                       const EngineInput *input,
+                       const CylinderConfig *cylinders, double t, double dt);
 
-/* Convenience readouts. */
+/* Convenience readouts. engine_model_torque_nm() returns the lumped
+ * indicated torque (all cylinders healthy); the true per-cylinder sum, which
+ * reflects faults, is cylinders_total_torque_nm() / ModelState.torque_nm. */
 double engine_model_rpm(const EngineState *state);
 double engine_model_torque_nm(const EngineState *state);
 
