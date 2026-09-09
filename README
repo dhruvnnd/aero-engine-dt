@@ -5,6 +5,24 @@ Requirements:
 2. SDL3.dll 
 
 Compile Instructions:
-cmake -S . -B build -G "MinGW Makefiles"
-cmake --build build
-.\build\aero_engine_dt.exe
+
+  cmake -S . -B build -G "MinGW Makefiles"
+  cmake --build build
+  .\build\aero_engine_dt.exe
+
+Headless testing:
+
+  cmake --build build
+  ctest --test-dir build --output-on-failure   # physics + model + sensor unit tests
+
+  .\build\twin_sim.exe --list                  # available mission profiles
+  .\build\twin_sim.exe --profile cruise-climb > runs\cc.csv
+  .\build\twin_sim.exe --profile rapid-throttle --sensor --dt 0.01 > runs\rt.csv
+
+Plotting the CSV (optional, needs Python + matplotlib):
+
+  pip install -r tools/requirements.txt
+  python tools/plot_run.py runs\cc.csv                    # stacked panel view
+  python tools/plot_run.py runs\cc.csv --y cht_c egt_c    # just these columns
+  python tools/plot_run.py --out runs\rt.png --sim -p hot-day --sensor
+
