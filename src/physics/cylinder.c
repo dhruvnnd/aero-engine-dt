@@ -3,25 +3,32 @@
 #include "physics/combustion.h"
 #include "physics/integrator.h"
 
-/* Retarded spark and a leaner charge both push exhaust temperature up. */
-static double egt_trim_factor(const CylinderConfig *c) {
-  const double k_spark_per_deg = 0.004;
-  const double k_leak = 0.6;
-  double f = 1.0 + k_spark_per_deg * c->spark_offset_deg +
-             k_leak * c->intake_leak_frac;
-  return f > 0.0 ? f : 0.0;
-}
-
 /* cooling_trim < 1 means the head sheds less heat -> hotter. */
 static double cht_cool_factor(const CylinderConfig *c) {
   return c->cooling_trim > 0.05 ? c->cooling_trim : 0.05;
 }
 
 /* Per-cylinder AFR ratio: extra fuel richens (lambda < 1), an intake leak
- * adds air and leans it (lambda > 1). */
+ * or a lean injector leans it (lambda > 1). */
 static double cylinder_lambda(const CylinderConfig *c) {
   double flow = c->injector_flow_trim > 0.05 ? c->injector_flow_trim : 0.05;
   return (1.0 / flow) * (1.0 + c->intake_leak_frac);
+}
+
+static double egt_trim_factor(const CylinderConfig *c) {
+  const double k_spark_per_deg = 0.004;
+  const double k_lean = 0.6;
+
+  double lean = cylinder_lambda(c) - 1.0;
+  if (lean < 0.0) {
+    lean = 0.0; /* rich mixtures are not modelled as hotter here */
+  }
+  if (lean > 1.0) {
+    lean = 1.0; /* very lean: burn slows/cools again -- cap the rise */
+  }
+
+  double f = 1.0 + k_spark_per_deg * c->spark_offset_deg + k_lean * lean;
+  return f > 0.0 ? f : 0.0;
 }
 
 /* Fraction of recent cycles that fail to fire, from the mixture strength. */
@@ -40,7 +47,8 @@ static double misfire_fraction(double lambda) {
  * intake leak each cut it; 1.0 at nominal trims. */
 static double torque_trim_factor(const CylinderConfig *c) {
   double inj = c->injector_flow_trim > 0.05 ? c->injector_flow_trim : 0.05;
-  double fuel = inj < 1.0 ? inj : 1.0; /* excess fuel past stoich doesn't burn */
+  double fuel =
+      inj < 1.0 ? inj : 1.0; /* excess fuel past stoich doesn't burn */
 
   double comp = c->compression_trim > 0.0 ? c->compression_trim : 0.0;
 
@@ -137,8 +145,7 @@ void cylinder_step(CylinderState *state, const CylinderConfig *config,
   /* Algebraic outputs -- not integrated. ca50/fuel_pw are rough placeholders
    * until a fuel path and displacement config land. */
   int n = num_cylinders > 0 ? num_cylinders : 1;
-  state->imep_bar =
-      0.02 * cylinder_torque_nm(config, map_kpa, omega_rad_s, n);
+  state->imep_bar = 0.02 * cylinder_torque_nm(config, map_kpa, omega_rad_s, n);
   state->lambda = cylinder_lambda(config);
   state->misfire_rate = misfire_fraction(state->lambda);
   state->ca50_deg =
