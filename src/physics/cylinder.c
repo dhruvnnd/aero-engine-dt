@@ -24,6 +24,57 @@ static double cylinder_lambda(const CylinderConfig *c) {
   return (1.0 / flow) * (1.0 + c->intake_leak_frac);
 }
 
+/* Fraction of recent cycles that fail to fire, from the mixture strength. */
+static double misfire_fraction(double lambda) {
+  if (lambda < 0.55 || lambda > 1.55) {
+    return 1.0; /* outside the flammability band */
+  }
+  if (lambda < 0.65 || lambda > 1.40) {
+    return 0.3; /* ragged edge */
+  }
+  return 0.0;
+}
+
+/* Share of nominal indicated work this cylinder still makes (1.0 = full).
+ * Less fuel (when lean), lower compression, spark away from MBT, or a lean
+ * intake leak each cut it; 1.0 at nominal trims. */
+static double torque_trim_factor(const CylinderConfig *c) {
+  double inj = c->injector_flow_trim > 0.05 ? c->injector_flow_trim : 0.05;
+  double fuel = inj < 1.0 ? inj : 1.0; /* excess fuel past stoich doesn't burn */
+
+  double comp = c->compression_trim > 0.0 ? c->compression_trim : 0.0;
+
+  double spark = 1.0 - 0.0008 * c->spark_offset_deg * c->spark_offset_deg;
+  if (spark < 0.0) {
+    spark = 0.0;
+  }
+
+  double leak = 1.0 - 0.5 * c->intake_leak_frac;
+  if (leak < 0.0) {
+    leak = 0.0;
+  }
+
+  return fuel * comp * spark * leak;
+}
+
+double cylinder_torque_nm(const CylinderConfig *config, double map_kpa,
+                          double omega_rad_s, int num_cylinders) {
+  int n = num_cylinders > 0 ? num_cylinders : 1;
+  double share = combustion_indicated_torque_nm(map_kpa, omega_rad_s) / n;
+  double firing = 1.0 - misfire_fraction(cylinder_lambda(config));
+  return share * torque_trim_factor(config) * firing;
+}
+
+double cylinders_total_torque_nm(const CylinderConfig *cyl, int num_cylinders,
+                                 double map_kpa, double omega_rad_s) {
+  int n = num_cylinders > 0 ? num_cylinders : 1;
+  double sum = 0.0;
+  for (int i = 0; i < n; i++) {
+    sum += cylinder_torque_nm(&cyl[i], map_kpa, omega_rad_s, n);
+  }
+  return sum;
+}
+
 CylinderConfig cylinder_config_default(void) {
   CylinderConfig cfg;
   cfg.injector_flow_trim = 1.0;
@@ -83,24 +134,14 @@ void cylinder_step(CylinderState *state, const CylinderConfig *config,
   state->cht_c = vec[CN_CHT];
   state->egt_c = vec[CN_EGT];
 
-  /* Algebraic outputs -- not integrated. imep/ca50/fuel_pw are rough
-   * placeholders until a fuel path and displacement config land. */
+  /* Algebraic outputs -- not integrated. ca50/fuel_pw are rough placeholders
+   * until a fuel path and displacement config land. */
   int n = num_cylinders > 0 ? num_cylinders : 1;
-  double cyl_torque_nm =
-      combustion_indicated_torque_nm(map_kpa, omega_rad_s) / n;
-  state->imep_bar = 0.02 * cyl_torque_nm * config->compression_trim;
-
+  state->imep_bar =
+      0.02 * cylinder_torque_nm(config, map_kpa, omega_rad_s, n);
   state->lambda = cylinder_lambda(config);
+  state->misfire_rate = misfire_fraction(state->lambda);
   state->ca50_deg =
       8.0 - config->spark_offset_deg; /* nominal MBT ~8 deg ATDC */
   state->fuel_pw_ms = (1.5 + 0.03 * map_kpa) * config->injector_flow_trim;
-
-  double lam = state->lambda;
-  if (lam < 0.55 || lam > 1.55) {
-    state->misfire_rate = 1.0; /* outside the flammability band */
-  } else if (lam < 0.65 || lam > 1.40) {
-    state->misfire_rate = 0.3; /* ragged edge */
-  } else {
-    state->misfire_rate = 0.0;
-  }
 }

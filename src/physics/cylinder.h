@@ -38,4 +38,16 @@ void cylinder_step(CylinderState *state, const CylinderConfig *config,
                    const ThermalConfig *thermal_cfg, int num_cylinders,
                    double t, double dt);
 
+/* This cylinder's contribution to engine indicated torque, N*m: an equal
+ * 1/num_cylinders share of combustion_indicated_torque_nm(), scaled by the
+ * cylinder's trims and zeroed while it is misfiring. A healthy cylinder
+ * returns exactly the lumped value / num_cylinders. */
+double cylinder_torque_nm(const CylinderConfig *config, double map_kpa,
+                          double omega_rad_s, int num_cylinders);
+
+/* Sum of cylinder_torque_nm() over cyl[0 .. num_cylinders). With all
+ * cylinders healthy this equals combustion_indicated_torque_nm(). */
+double cylinders_total_torque_nm(const CylinderConfig *cyl, int num_cylinders,
+                                 double map_kpa, double omega_rad_s);
+
 #endif /* PHYSICS_CYLINDER_H */
