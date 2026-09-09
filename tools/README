@@ -137,6 +137,7 @@ Notes
 Run outputs belong in runs/ (gitignored). CSVs are regenerable from
 twin_sim, so don't commit them.
 
-plot_run.py reads the CSV as UTF-8 with an optional BOM and skips '#'
-lines, so a PowerShell-redirected file (UTF-16 BOM) or one with the
-stderr banner merged in still loads.
+plot_run.py auto-detects the encoding -- UTF-8, UTF-8/UTF-16 with a BOM,
+or BOM-less UTF-16 -- and skips '#' lines, so a PowerShell-redirected file
+(`twin_sim ... > run.csv` writes UTF-16 there) or one with the stderr
+banner merged in still loads.

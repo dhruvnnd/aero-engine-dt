@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import io
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,11 +81,25 @@ def run_twin_sim(exe, args):
     return proc.stdout, proc.stderr
 
 
-def load_csv(stream):
-    """Parse twin_sim CSV. Tolerates a merged-in '#' banner and a UTF-8 BOM.
-    Returns (fieldnames, {column: [float, ...]}, banner_text)."""
-    raw = list(stream)
-    banner = "".join(ln for ln in raw if ln.lstrip().startswith("#"))
+def decode_csv_bytes(data):
+    """Decode CSV bytes to text, honouring a UTF-8 or UTF-16 BOM and also
+    sniffing BOM-less UTF-16 -- what PowerShell's `>` redirection writes."""
+    if data.startswith(b"\xef\xbb\xbf"):
+        return data.decode("utf-8-sig")
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16")  # strips the BOM, picks endianness
+    head = data[:256]
+    if head and head.count(0) > len(head) // 3:  # lots of NULs -> UTF-16, no BOM
+        return data.decode("utf-16-le" if head[1:2] == b"\x00" else "utf-16-be")
+    return data.decode("utf-8", errors="replace")
+
+
+def load_csv(text):
+    """Parse twin_sim CSV text into (fieldnames, {column: [float,...]}, banner).
+    Tolerates a merged-in '#' banner. Encoding is handled by
+    decode_csv_bytes() at the call sites."""
+    raw = text.splitlines()
+    banner = "\n".join(ln for ln in raw if ln.lstrip().startswith("#"))
     lines = [ln for ln in raw if ln.strip() and not ln.lstrip().startswith("#")]
     reader = csv.DictReader(lines)
     if not reader.fieldnames:
@@ -314,17 +327,17 @@ def main():
 
     if args.sim is not None:
         text, banner = run_twin_sim(find_twin_sim(args.twin_sim), args.sim)
-        _fields, cols, embedded = load_csv(io.StringIO(text))
+        _fields, cols, embedded = load_csv(text)
         banner += embedded
         source_label = "twin_sim " + " ".join(args.sim)
         if "--sensor" in args.sim:
             args.sensor = True
     elif args.csv == "-" or (args.csv is None and not sys.stdin.isatty()):
-        _fields, cols, banner = load_csv(sys.stdin)
+        _fields, cols, banner = load_csv(decode_csv_bytes(sys.stdin.buffer.read()))
         source_label = "stdin"
     elif args.csv:
-        with open(args.csv, encoding="utf-8-sig") as fp:
-            _fields, cols, banner = load_csv(fp)
+        _fields, cols, banner = load_csv(
+            decode_csv_bytes(Path(args.csv).read_bytes()))
         source_label = args.csv
     else:
         ap.error("give a CSV path, '-' for stdin, or --sim ...")
