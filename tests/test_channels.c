@@ -32,8 +32,9 @@ static void test_getters_match_state_fields(void) {
   in.throttle = 0.8;
   in.load_torque_nm = 40.0;
   in.ambient_pressure_kpa = 101.325;
+  EnvInput env = {0.0, 0.0, 0.0}; /* sea level, still air */
   for (int i = 0; i < 500; i++) {
-    model_sync_step(&sync, &st, &in, 15.0, 0.01);
+    model_sync_step(&sync, &st, &in, &env, 0.01);
   }
 
   int n = 0;

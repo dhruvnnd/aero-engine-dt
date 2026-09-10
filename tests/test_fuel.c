@@ -4,11 +4,14 @@
 #include "model/sync.h"
 #include "physics/fuel.h"
 
+/* sea level, still air, ISA 15 degC -> oat_c == 15.0 */
+static const EnvInput ENV_SL = {0.0, 0.0, 0.0};
+
 static void run(ModelSync *sync, ModelState *st, const EngineInput *in,
                 double seconds) {
   int steps = (int)(seconds / 0.01 + 0.5);
   for (int i = 0; i < steps; i++) {
-    model_sync_step(sync, st, in, 15.0, 0.01);
+    model_sync_step(sync, st, in, &ENV_SL, 0.01);
   }
 }
 

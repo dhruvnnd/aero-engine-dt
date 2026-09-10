@@ -75,9 +75,10 @@ static void run(ModelSync *sync, ModelState *st, double seconds) {
   in.throttle = 0.85;
   in.load_torque_nm = 40.0;
   in.ambient_pressure_kpa = 101.325;
+  EnvInput env = {0.0, 0.0, 0.0}; /* sea level, still air */
   int steps = (int)(seconds / 0.01 + 0.5);
   for (int i = 0; i < steps; i++) {
-    model_sync_step(sync, st, &in, 15.0, 0.01);
+    model_sync_step(sync, st, &in, &env, 0.01);
   }
 }
 
