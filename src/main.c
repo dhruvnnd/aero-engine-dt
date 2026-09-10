@@ -59,10 +59,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     return SDL_APP_FAILURE;
   }
 
-  /* Optional -- the sim runs fine without it, so a failure here is not fatal. */
+  /* Optional -- the sim runs fine without it, so a failure here is not fatal.
+   * Created hidden; the G key brings it up on demand. */
   if (sdl_window_init(&app->gamepad_ctx, "aero engine dt | gamepad", GP_WIN_W,
                       GP_WIN_H)) {
-    app->gamepad_win_shown = true;
+    SDL_HideWindow(app->gamepad_ctx.window);
+    app->gamepad_win_shown = false;
   } else {
     SDL_Log("gamepad panel window unavailable: %s", SDL_GetError());
     app->gamepad_ctx.window = NULL;
@@ -81,7 +83,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   SensorConfig scfg = sensor_config_default();
   sensor_init(&app->sensor, &scfg, 0xC0FFEEu);
   app->display = app->state;
-  app->sensor_mode = 1;
+  app->sensor_mode = 0; /* start on the raw model feed; M toggles the noisy one */
 
   sdl_input_init(&app->input);
   dashboard_init(&app->dash);
