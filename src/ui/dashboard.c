@@ -126,9 +126,9 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
 
   UiRect body;
   UiRect footer = ui_split_bottom(rest, 10.0f, 6.0f, &body);
-  ui_text(
-      r, footer.x, footer.y, th->text_dim,
-      "UP/DN or W/S  throttle      M  sensor / model      G  gamepad panel");
+  ui_text(r, footer.x, footer.y, th->text_dim,
+          "UP/DN or W/S  throttle    M  sensor / model    G  gamepad panel    "
+          "F  fullscreen");
 
   UiRect right;
   UiRect left = ui_split_left_frac(body, 0.42f, 8.0f, &right);
