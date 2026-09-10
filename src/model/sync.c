@@ -4,6 +4,7 @@
 #include "physics/cylinder.h"
 #include "physics/electrical.h"
 #include "physics/engine_model.h"
+#include "physics/environment.h"
 #include "physics/fuel.h"
 #include "physics/lubrication.h"
 #include "physics/thermal.h"
@@ -32,6 +33,8 @@ void model_sync_step(ModelSync *sync, ModelState *state,
       combustion_waste_heat_w(state->engine.map_kpa, state->engine.omega_rad_s);
   double load_frac = combustion_load_fraction(state->engine.map_kpa,
                                               state->engine.omega_rad_s);
+
+  environment_state(&state->env, 0.0, ambient_temp_c - 15.0, 0.0);
 
   double cool_index = 1.0;
 
