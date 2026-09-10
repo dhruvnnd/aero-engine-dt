@@ -4,12 +4,14 @@
 #include "physics/cylinder.h"
 #include "physics/engine_model.h"
 #include "physics/fuel.h"
+#include "physics/lubrication.h"
 #include "physics/thermal.h"
 
 void model_sync_init(ModelSync *sync) {
   sync->engine_config = engine_config_default();
   sync->thermal_config = thermal_config_default();
   sync->fuel_config = fuel_config_default();
+  sync->lube_config = lube_config_default();
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     sync->cyl_config[i] = cylinder_config_default();
   }
@@ -51,4 +53,8 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   fuel_step(&state->fuel, &sync->fuel_config, sync->cyl_config,
             sync->engine_config.num_cylinders, state->engine.map_kpa,
             state->rpm, ambient_temp_c);
+
+  /* Oil pressure from the settled crank speed and current oil temperature. */
+  lube_step(&state->lube, &sync->lube_config, state->rpm,
+            state->thermal.oil_temp_c);
 }

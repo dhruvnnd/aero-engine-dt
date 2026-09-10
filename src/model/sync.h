@@ -5,17 +5,19 @@
 #include "physics/cylinder.h"
 #include "physics/engine_model.h"
 #include "physics/fuel.h"
+#include "physics/lubrication.h"
 #include "physics/thermal.h"
 
 typedef struct {
   EngineConfig engine_config;
   ThermalConfig thermal_config;
   FuelConfig fuel_config;
+  LubeConfig lube_config;
   CylinderConfig cyl_config[ENGINE_MAX_CYLINDERS]; /* one per cylinder slot */
   double sim_time_s; /* accumulated simulated time, passed to the integrators */
 } ModelSync;
 
-/* Loads the default engine/thermal/fuel/cylinder configs, zeroes the clock. */
+/* Loads the default engine/thermal/fuel/lube/cylinder configs, zeroes clock. */
 void model_sync_init(ModelSync *sync);
 
 void model_sync_step(ModelSync *sync, ModelState *state,
