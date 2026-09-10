@@ -21,11 +21,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "model/channels.h"
+#include "model/state.h"
+#include "model/sync.h"
 #include "physics/environment.h"
 #include "telemetry/sensor.h"
-#include "model/channels.h"
-#include "model/sync.h"
-#include "model/state.h"
 
 typedef struct {
   const char *name;
@@ -33,6 +33,7 @@ typedef struct {
   double duration_s; /* default; overridable with --duration */
   double (*throttle)(double t);
   double (*altitude_m)(double t);
+  double (*airspeed_ms)(double t); /* true airspeed; sets ram-air cooling */
   double ambient_offset_c; /* added to ISA temperature (hot-day, etc.) */
 } SimProfile;
 
@@ -48,10 +49,19 @@ static double thr_idle(double t) {
   return 0.0;
 }
 
+static double spd_zero(double t) {
+  (void)t;
+  return 0.0; /* parked / test stand: no ram air, prop wash only */
+}
+
 static double thr_takeoff(double t) { return clamp01(t / 5.0); }
 static double alt_takeoff(double t) {
   double climb = (t - 10.0) * 10.0; /* 10 m/s, after a 10 s ground roll */
   return climb < 0.0 ? 0.0 : climb;
+}
+static double spd_takeoff(double t) {
+  double v = 3.5 * t;         /* accelerate down the runway */
+  return v > 38.0 ? 38.0 : v; /* then hold the climb-out speed */
 }
 
 static double thr_cruise(double t) {
@@ -61,6 +71,10 @@ static double thr_cruise(double t) {
 static double alt_cruiseclimb(double t) {
   double a = t * 5.0; /* 5 m/s */
   return a > 4500.0 ? 4500.0 : a;
+}
+static double spd_cruiseclimb(double t) {
+  double v = 6.0 * t; /* spool up to the best-climb speed */
+  return v > 46.0 ? 46.0 : v;
 }
 
 static double thr_hotday(double t) {
@@ -73,15 +87,17 @@ static double thr_rapid(double t) {
 }
 
 static const SimProfile PROFILES[] = {
-    {"idle", "closed throttle, sea level", 120.0, thr_idle, alt_ground, 0.0},
+    {"idle", "closed throttle, sea level, static", 120.0, thr_idle, alt_ground,
+     spd_zero, 0.0},
     {"takeoff", "throttle ramp to WOT, ground roll then 10 m/s climb", 120.0,
-     thr_takeoff, alt_takeoff, 0.0},
+     thr_takeoff, alt_takeoff, spd_takeoff, 0.0},
     {"cruise-climb", "0.75 throttle, 5 m/s climb capped at 4500 m", 900.0,
-     thr_cruise, alt_cruiseclimb, 0.0},
-    {"hot-day", "0.80 throttle, sea level, ISA +25 C", 300.0, thr_hotday,
-     alt_ground, 25.0},
-    {"rapid-throttle", "0.20 <-> 1.00 square wave, 20 s period, sea level",
-     120.0, thr_rapid, alt_ground, 0.0},
+     thr_cruise, alt_cruiseclimb, spd_cruiseclimb, 0.0},
+    {"hot-day", "0.80 throttle, sea level, static, ISA +25 C", 300.0,
+     thr_hotday, alt_ground, spd_zero, 25.0},
+    {"rapid-throttle",
+     "0.20 <-> 1.00 square wave, 20 s period, sea level static", 120.0,
+     thr_rapid, alt_ground, spd_zero, 0.0},
 };
 static const int PROFILE_COUNT = (int)(sizeof(PROFILES) / sizeof(PROFILES[0]));
 
@@ -186,21 +202,21 @@ static void apply_cyl_faults(ModelSync *sync) {
     CylinderConfig *c = &sync->cyl_config[g_faults[i].cyl0];
     double v = g_faults[i].value;
     switch (g_faults[i].key) {
-      case CYL_KEY_INJ:
-        c->injector_flow_trim = v;
-        break;
-      case CYL_KEY_COMP:
-        c->compression_trim = v;
-        break;
-      case CYL_KEY_SPARK:
-        c->spark_offset_deg = v;
-        break;
-      case CYL_KEY_LEAK:
-        c->intake_leak_frac = v;
-        break;
-      case CYL_KEY_COOL:
-        c->cooling_trim = v;
-        break;
+    case CYL_KEY_INJ:
+      c->injector_flow_trim = v;
+      break;
+    case CYL_KEY_COMP:
+      c->compression_trim = v;
+      break;
+    case CYL_KEY_SPARK:
+      c->spark_offset_deg = v;
+      break;
+    case CYL_KEY_LEAK:
+      c->intake_leak_frac = v;
+      break;
+    case CYL_KEY_COOL:
+      c->cooling_trim = v;
+      break;
     }
   }
 }
@@ -291,7 +307,7 @@ int main(int argc, char **argv) {
   int nchan = 0;
   const ModelChannel *chans = model_channels(&nchan);
 
-  printf("t,throttle,alt_m,ambient_c");
+  printf("t,throttle,alt_m,ambient_c,airspeed_ms,cool_index");
   for (int c = 0; c < nchan; c++) {
     printf(",%s", chans[c].name);
   }
@@ -311,11 +327,18 @@ int main(int argc, char **argv) {
     }
 
     double alt_m = profile->altitude_m(t);
+    double airspeed_ms = profile->airspeed_ms(t);
     AtmosphereState atm = environment_isa(alt_m);
     double ambient_c = (atm.temperature_k - 273.15) + profile->ambient_offset_c;
     double throttle = profile->throttle(t);
 
-    printf("%.3f,%.4f,%.1f,%.2f", t, throttle, alt_m, ambient_c);
+    EnvState env_now;
+    environment_state(&env_now, alt_m, profile->ambient_offset_c, airspeed_ms);
+    double cool_index =
+        environment_cool_index(env_now.density_kg_m3, airspeed_ms, st.rpm);
+
+    printf("%.3f,%.4f,%.1f,%.2f,%.2f,%.4f", t, throttle, alt_m, ambient_c,
+           airspeed_ms, cool_index);
     for (int c = 0; c < nchan; c++) {
       printf(",%.*f", chans[c].precision, chans[c].get(&st, chans[c].index));
     }
@@ -333,7 +356,12 @@ int main(int argc, char **argv) {
       in.throttle = throttle;
       in.load_torque_nm = load_nm;
       in.ambient_pressure_kpa = atm.pressure_kpa;
-      model_sync_step(&sync, &st, &in, ambient_c, dt);
+
+      EnvInput env_in;
+      env_in.altitude_m = alt_m;
+      env_in.airspeed_ms = airspeed_ms;
+      env_in.oat_offset_c = profile->ambient_offset_c;
+      model_sync_step(&sync, &st, &in, &env_in, dt);
     }
   }
 
