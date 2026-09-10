@@ -30,7 +30,7 @@ typedef struct {
   ModelState state;   /* exact model / twin state */
   ModelState display; /* noisy instrument feed the dashboard renders */
   Sensor sensor;
-  int sensor_mode;    /* 1 = show the noisy feed, 0 = show raw model state */
+  int sensor_mode; /* 1 = show the noisy feed, 0 = show raw model state */
   SdlInputState input;
   Dashboard dash;
 
@@ -77,10 +77,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   if (event->type == SDL_EVENT_QUIT) {
     return SDL_APP_SUCCESS;
   }
-  if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
-      event->key.key == SDLK_M) {
+  if ((event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+       event->key.key == SDLK_M) ||
+      (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+       event->gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)) {
     app->sensor_mode = !app->sensor_mode;
   }
+  sdl_input_handle_event(&app->input, event);
   return SDL_APP_CONTINUE;
 }
 
@@ -115,8 +118,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     app->sample_accum_s -= SAMPLE_PERIOD_S;
   }
 
-  const ModelState *shown =
-      app->sensor_mode ? &app->display : &app->state;
+  const ModelState *shown = app->sensor_mode ? &app->display : &app->state;
 
   SDL_SetRenderDrawColor(renderer, 10, 14, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
@@ -132,5 +134,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   (void)result;
   AppState *app = (AppState *)appstate;
+  sdl_input_shutdown(&app->input);
   sdl_window_shutdown(&app->window_ctx);
 }
