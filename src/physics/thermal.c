@@ -1,4 +1,7 @@
 #include "physics/thermal.h"
+
+#include <math.h>
+
 #include "physics/integrator.h"
 
 enum {
@@ -10,18 +13,33 @@ enum {
 
 typedef struct {
   double waste_heat_w;
+  double load_frac;
   double ambient_temp_c;
   double cht_tau_s;
   double egt_tau_s;
   double oil_tau_s;
-  double cht_gain_c_per_w;
-  double egt_gain_c_per_w;
+  double cht_rise_rated_c;
+  double egt_rise_rated_c;
   double oil_gain_c_per_w;
 } ThermalDerivParams;
 
-/* First-order target: ambient plus a linear rise with waste heat. */
-static double node_target_c(double gain_c_per_w, double waste_heat_w,
-                            double ambient_temp_c) {
+/* CHT/EGT target: ambient plus a rise that saturates with load. sqrt() so it
+ * is 0 with the engine stopped, ~half at idle, full at rated power -- gas and
+ * head temperatures don't scale without bound with absolute engine power. */
+double thermal_rise_c(double rise_rated_c, double load_frac) {
+  double lf = load_frac;
+  if (lf < 0.0) {
+    lf = 0.0;
+  }
+  if (lf > 1.0) {
+    lf = 1.0;
+  }
+  return rise_rated_c * sqrt(lf);
+}
+
+/* Oil target: linear in raw waste heat (slow bulk sink, no saturation). */
+static double oil_target_c(double gain_c_per_w, double waste_heat_w,
+                           double ambient_temp_c) {
   return ambient_temp_c + gain_c_per_w * waste_heat_w;
 }
 
@@ -34,16 +52,15 @@ static void thermal_derivative(const double *state, double *dstate, double t,
   double egt = state[THERMAL_STATE_EGT];
   double oil = state[THERMAL_STATE_OIL];
 
-  dstate[THERMAL_STATE_CHT] =
-      (node_target_c(p->cht_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
-       cht) /
-      p->cht_tau_s;
-  dstate[THERMAL_STATE_EGT] =
-      (node_target_c(p->egt_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
-       egt) /
-      p->egt_tau_s;
+  double cht_target =
+      p->ambient_temp_c + thermal_rise_c(p->cht_rise_rated_c, p->load_frac);
+  double egt_target =
+      p->ambient_temp_c + thermal_rise_c(p->egt_rise_rated_c, p->load_frac);
+
+  dstate[THERMAL_STATE_CHT] = (cht_target - cht) / p->cht_tau_s;
+  dstate[THERMAL_STATE_EGT] = (egt_target - egt) / p->egt_tau_s;
   dstate[THERMAL_STATE_OIL] =
-      (node_target_c(p->oil_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
+      (oil_target_c(p->oil_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
        oil) /
       p->oil_tau_s;
 }
@@ -53,8 +70,8 @@ ThermalConfig thermal_config_default(void) {
   cfg.cht_tau_s = 90.0;  /* metal head: moderate thermal mass */
   cfg.egt_tau_s = 5.0;   /* exhaust gas: responds almost immediately */
   cfg.oil_tau_s = 240.0; /* oil sump: large thermal mass, slowest to move */
-  cfg.cht_gain_c_per_w = 0.008;
-  cfg.egt_gain_c_per_w = 0.035;
+  cfg.cht_rise_rated_c = 210.0;
+  cfg.egt_rise_rated_c = 780.0;
   cfg.oil_gain_c_per_w = 0.004;
   return cfg;
 }
@@ -66,19 +83,20 @@ void thermal_init(ThermalState *state, double ambient_temp_c) {
 }
 
 void thermal_step(ThermalState *state, const ThermalConfig *config,
-                  double waste_heat_w, double ambient_temp_c, double t,
-                  double dt) {
+                  double waste_heat_w, double load_frac, double ambient_temp_c,
+                  double t, double dt) {
   double vec[THERMAL_STATE_COUNT] = {state->cht_c, state->egt_c,
                                      state->oil_temp_c};
 
   ThermalDerivParams params;
   params.waste_heat_w = waste_heat_w;
+  params.load_frac = load_frac;
   params.ambient_temp_c = ambient_temp_c;
   params.cht_tau_s = config->cht_tau_s;
   params.egt_tau_s = config->egt_tau_s;
   params.oil_tau_s = config->oil_tau_s;
-  params.cht_gain_c_per_w = config->cht_gain_c_per_w;
-  params.egt_gain_c_per_w = config->egt_gain_c_per_w;
+  params.cht_rise_rated_c = config->cht_rise_rated_c;
+  params.egt_rise_rated_c = config->egt_rise_rated_c;
   params.oil_gain_c_per_w = config->oil_gain_c_per_w;
 
   integrator_rk4_step(vec, THERMAL_STATE_COUNT, t, dt, thermal_derivative,

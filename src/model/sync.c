@@ -24,13 +24,14 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   engine_model_step(&state->engine, &sync->engine_config, input,
                     sync->cyl_config, sync->sim_time_s, dt);
 
-  /* Heat into the thermal model is whatever the current (post-step)
-   * operating point releases; at frame-scale dt the half-step lag versus
-   * evaluating it at the pre-step point is negligible. */
+  /* Thermal drivers from the current (post-step) operating point: raw waste
+   * heat for the oil node, load fraction for the saturating CHT/EGT nodes. */
   double waste_heat_w =
       combustion_waste_heat_w(state->engine.map_kpa, state->engine.omega_rad_s);
+  double load_frac = combustion_load_fraction(state->engine.map_kpa,
+                                              state->engine.omega_rad_s);
 
-  thermal_step(&state->thermal, &sync->thermal_config, waste_heat_w,
+  thermal_step(&state->thermal, &sync->thermal_config, waste_heat_w, load_frac,
                ambient_temp_c, sync->sim_time_s, dt);
 
   for (int i = 0; i < sync->engine_config.num_cylinders; i++) {

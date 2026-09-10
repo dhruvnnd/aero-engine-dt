@@ -32,3 +32,19 @@ double combustion_waste_heat_w(double map_kpa, double omega_rad_s) {
   double total_energy_w = indicated_power_w / COMBUSTION_INDICATED_EFFICIENCY;
   return total_energy_w - indicated_power_w;
 }
+
+double combustion_load_fraction(double map_kpa, double omega_rad_s) {
+  /* Roughly the peak indicated power this torque curve can make, for a
+   * placeholder ~2 L engine. Tune with the rest of the perf map. */
+  const double rated_indicated_power_w = 16000.0;
+
+  double lf = combustion_indicated_power_w(map_kpa, omega_rad_s) /
+              rated_indicated_power_w;
+  if (lf < 0.0) {
+    lf = 0.0;
+  }
+  if (lf > 1.0) {
+    lf = 1.0;
+  }
+  return lf;
+}

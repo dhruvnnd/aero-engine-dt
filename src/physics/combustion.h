@@ -11,4 +11,9 @@ double combustion_indicated_power_w(double map_kpa, double omega_rad_s);
  * efficiency, minus the indicated power itself. */
 double combustion_waste_heat_w(double map_kpa, double omega_rad_s);
 
+/* Engine load as a fraction of rated indicated power, clamped to [0, 1].
+ * 0 when the crank is stopped. Drives the (saturating) CHT/EGT targets so
+ * gas/metal temperatures don't scale without bound with absolute power. */
+double combustion_load_fraction(double map_kpa, double omega_rad_s);
+
 #endif /* PHYSICS_COMBUSTION_H */
