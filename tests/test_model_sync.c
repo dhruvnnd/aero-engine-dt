@@ -71,7 +71,7 @@ static void test_throttle_up_spins_and_heats(void) {
   CHECK(st.thermal.oil_temp_c >= amb - 1e-6);       /* never below ambient */
 }
 
-static void test_cht_settles_near_waste_heat_target(void) {
+static void test_cht_settles_near_load_scaled_target(void) {
   ModelSync sync;
   model_sync_init(&sync);
   ModelState st;
@@ -81,8 +81,11 @@ static void test_cht_settles_near_waste_heat_target(void) {
   for (int i = 0; i < 120000; i++) { /* 1200 s -> well past CHT tau */
     model_sync_step(&sync, &st, &in, amb, 0.01);
   }
-  double q = combustion_waste_heat_w(st.engine.map_kpa, st.engine.omega_rad_s);
-  CHECK_NEAR(st.thermal.cht_c, amb + 0.008 * q, 2.0);
+  double lf =
+      combustion_load_fraction(st.engine.map_kpa, st.engine.omega_rad_s);
+  double target =
+      amb + thermal_rise_c(sync.thermal_config.cht_rise_rated_c, lf);
+  CHECK_NEAR(st.thermal.cht_c, target, 2.0);
 }
 
 static const TestCase CASES[] = {
@@ -91,8 +94,8 @@ static const TestCase CASES[] = {
     {"model_sync.derived_readouts_stay_in_sync",
      test_derived_readouts_stay_in_sync},
     {"model_sync.throttle_up_spins_and_heats", test_throttle_up_spins_and_heats},
-    {"model_sync.cht_settles_near_waste_heat_target",
-     test_cht_settles_near_waste_heat_target},
+    {"model_sync.cht_settles_near_load_scaled_target",
+     test_cht_settles_near_load_scaled_target},
 };
 
 RUN_TESTS(CASES)
