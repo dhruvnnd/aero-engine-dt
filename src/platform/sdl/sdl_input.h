@@ -5,21 +5,36 @@
 
 typedef struct {
   double throttle; /* current lever position, 0.0 (closed) .. 1.0 (WOT) */
+
+  SDL_Gamepad *pad;      /* first bound gamepad, or NULL if none attached */
+  SDL_JoystickID pad_id; /* instance id backing `pad`, for hotplug matching */
 } SdlInputState;
 
-/* Sets the lever to fully closed. */
+/* Sets the lever to fully closed, brings up SDL's gamepad subsystem, and
+ * binds the first gamepad already attached (if any). */
 void sdl_input_init(SdlInputState *input);
 
-/* Reads the current keyboard state and moves `throttle` toward its held
- * target by `dt` seconds' worth of lever travel, then clamps to [0, 1].
+/* Releases any bound gamepad. Safe to call when none is held. */
+void sdl_input_shutdown(SdlInputState *input);
+
+/* Feeds SDL gamepad connect/disconnect events so a controller plugged in
+ * after startup gets picked up, and a yanked one dropped (falling back to
+ * any other still-attached pad). Ignores every other event type. Call from
+ * SDL_AppEvent. */
+void sdl_input_handle_event(SdlInputState *input, const SDL_Event *event);
+
+/* Reads the current keyboard + gamepad state and moves `throttle` toward its
+ * held target by `dt` seconds' worth of lever travel, then clamps to [0, 1].
  *
- *   Up   / W  -- open throttle
- *   Down / S  -- close throttle
- *   Home      -- snap fully open
- *   End       -- snap fully closed
+ *   Up / W ...... D-pad Up,   left stick up ..... open throttle
+ *   Down / S .... D-pad Down, left stick down ... close throttle
+ *   Home ........ right shoulder ................ snap fully open
+ *   End ......... left shoulder ................. snap fully closed
+ *               ( right trigger ) .............. hold the lever at the
+ *                                                trigger's own position
  *
- * Call once per frame. SDL_AppIterate runs after event delivery, so the
- * keyboard snapshot is already current there. */
+ * Call once per frame. SDL_AppIterate runs after event delivery, so both
+ * input snapshots are already current there. */
 void sdl_input_update(SdlInputState *input, double dt);
 
 #endif /* PLATFORM_SDL_SDL_INPUT_H */
