@@ -40,8 +40,8 @@ double thermal_rise_c(double rise_rated_c, double load_frac) {
 
 double thermal_cool_divisor(double cool_index) {
   double c = cool_index;
-  if (c < 0.05) {
-    c = 0.05;
+  if (c < 0.35) {
+    c = 0.35;
   }
   if (c > 4.0) {
     c = 4.0;
