@@ -1,3 +1,4 @@
+#include <SDL3/SDL_video.h>
 #define SDL_MAIN_USE_CALLBACKS 1 /* use the callbacks instead of main() */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -39,6 +40,7 @@ typedef struct {
   ModelState display; /* noisy instrument feed the dashboard renders */
   Sensor sensor;
   int sensor_mode; /* 1 = show the noisy feed, 0 = show raw model state */
+  int fullscreen;
   SdlInputState input;
   Dashboard dash;
 
@@ -128,6 +130,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     } else {
       SDL_HideWindow(app->gamepad_ctx.window);
     }
+  }
+
+  /* Handle fullscreen */
+  if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+      event->key.key == SDLK_F && app->window_ctx.window) {
+    app->fullscreen = !app->fullscreen;
+    SDL_SetWindowFullscreen(app->window_ctx.window, app->fullscreen);
   }
 
   sdl_input_handle_event(&app->input, event);
