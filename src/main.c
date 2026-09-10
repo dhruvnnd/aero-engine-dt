@@ -29,7 +29,8 @@
 
 typedef struct {
   SdlWindowContext window_ctx;
-  SdlWindowContext gamepad_ctx; /* companion panel; window == NULL if it failed */
+  SdlWindowContext
+      gamepad_ctx; /* companion panel; window == NULL if it failed */
   bool gamepad_win_shown;
   SdlFrameTimer timer;
 
@@ -83,7 +84,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   SensorConfig scfg = sensor_config_default();
   sensor_init(&app->sensor, &scfg, 0xC0FFEEu);
   app->display = app->state;
-  app->sensor_mode = 0; /* start on the raw model feed; M toggles the noisy one */
+  app->sensor_mode = 0;
 
   sdl_input_init(&app->input);
   dashboard_init(&app->dash);
