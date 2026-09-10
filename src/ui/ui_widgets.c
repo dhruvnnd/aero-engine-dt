@@ -7,10 +7,12 @@ static const float kGlyph = (float)SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
 #define UI_SPARK_MAX 512
 
 UiStatus ui_status_for(double value, UiRange range) {
-  if (range.has_alert && value >= range.alert) {
+  if ((range.has_alert_lo && value <= range.alert_lo) ||
+      (range.has_alert_hi && value >= range.alert_hi)) {
     return UI_ALERT;
   }
-  if (range.has_warn && value >= range.warn) {
+  if ((range.has_warn_lo && value <= range.warn_lo) ||
+      (range.has_warn_hi && value >= range.warn_hi)) {
     return UI_WARN;
   }
   return UI_OK;
@@ -28,6 +30,14 @@ SDL_Color ui_status_color(const UiTheme *th, UiStatus s) {
   default:
     return th->text;
   }
+}
+
+/* Vertical tick on a bar-gauge track at scale position `at`. */
+static void ui_gauge_tick(SDL_Renderer *r, UiRect track, UiRange range,
+                          double at, SDL_Color c) {
+  float tx =
+      track.x + (float)ui_map(at, range.lo, range.hi, 0.0, (double)track.w);
+  ui_vline(r, tx, track.y - 2.0f, track.h + 4.0f, c);
 }
 
 const char *ui_status_token(UiStatus s) {
@@ -124,15 +134,17 @@ void ui_bar_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
     ui_fill(r, fill, ui_status_color(th, st));
   }
 
-  if (range.has_warn) {
-    float tx = track.x + (float)ui_map(range.warn, range.lo, range.hi, 0.0,
-                                       (double)track.w);
-    ui_vline(r, tx, track.y - 2.0f, track.h + 4.0f, th->warn);
+  if (range.has_warn_lo) {
+    ui_gauge_tick(r, track, range, range.warn_lo, th->warn);
   }
-  if (range.has_alert) {
-    float tx = track.x + (float)ui_map(range.alert, range.lo, range.hi, 0.0,
-                                       (double)track.w);
-    ui_vline(r, tx, track.y - 2.0f, track.h + 4.0f, th->alert);
+  if (range.has_warn_hi) {
+    ui_gauge_tick(r, track, range, range.warn_hi, th->warn);
+  }
+  if (range.has_alert_lo) {
+    ui_gauge_tick(r, track, range, range.alert_lo, th->alert);
+  }
+  if (range.has_alert_hi) {
+    ui_gauge_tick(r, track, range, range.alert_hi, th->alert);
   }
 }
 
@@ -257,6 +269,13 @@ static float ui_dial_angle(double value, UiRange range) {
   return UI_DIAL_START + UI_DIAL_SWEEP * (float)t;
 }
 
+/* Band arc a0..a1 drawn twice (rad, rad-1) so it reads as a heavier stroke. */
+static void ui_dial_band(SDL_Renderer *r, float cx, float cy, float rad,
+                         float a0, float a1, SDL_Color c) {
+  ui_arc(r, cx, cy, rad, a0, a1, 24, c);
+  ui_arc(r, cx, cy, rad - 1.0f, a0, a1, 24, c);
+}
+
 void ui_dial_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
                    const char *label, double value, const char *unit,
                    int precision, UiRange range) {
@@ -286,19 +305,30 @@ void ui_dial_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
   ui_arc(r, cx, cy, rad, UI_DIAL_START, UI_DIAL_START + UI_DIAL_SWEEP, 64,
          th->frame);
 
-  /* caution / warning band arcs, doubled up just inside the scale for weight */
-  if (range.has_warn) {
-    float a0 = ui_dial_angle(range.warn, range);
-    float a1 = range.has_alert ? ui_dial_angle(range.alert, range)
-                               : UI_DIAL_START + UI_DIAL_SWEEP;
-    ui_arc(r, cx, cy, rad, a0, a1, 24, th->warn);
-    ui_arc(r, cx, cy, rad - 1.0f, a0, a1, 24, th->warn);
+  /* caution / warning band arcs, doubled up just inside the scale for weight.
+   * High-side bands run outward from their threshold to the top of the scale;
+   * low-side bands run inward from the bottom of the scale to their threshold.
+   * The redder band is drawn last so it wins any overlap. */
+  const float a_lo = UI_DIAL_START;
+  const float a_hi = UI_DIAL_START + UI_DIAL_SWEEP;
+
+  if (range.has_warn_hi) {
+    float a1 = range.has_alert_hi ? ui_dial_angle(range.alert_hi, range) : a_hi;
+    ui_dial_band(r, cx, cy, rad, ui_dial_angle(range.warn_hi, range), a1,
+                 th->warn);
   }
-  if (range.has_alert) {
-    float a0 = ui_dial_angle(range.alert, range);
-    float a1 = UI_DIAL_START + UI_DIAL_SWEEP;
-    ui_arc(r, cx, cy, rad, a0, a1, 18, th->alert);
-    ui_arc(r, cx, cy, rad - 1.0f, a0, a1, 18, th->alert);
+  if (range.has_warn_lo) {
+    float a0 = range.has_alert_lo ? ui_dial_angle(range.alert_lo, range) : a_lo;
+    ui_dial_band(r, cx, cy, rad, a0, ui_dial_angle(range.warn_lo, range),
+                 th->warn);
+  }
+  if (range.has_alert_hi) {
+    ui_dial_band(r, cx, cy, rad, ui_dial_angle(range.alert_hi, range), a_hi,
+                 th->alert);
+  }
+  if (range.has_alert_lo) {
+    ui_dial_band(r, cx, cy, rad, a_lo, ui_dial_angle(range.alert_lo, range),
+                 th->alert);
   }
 
   /* major tick marks */

@@ -14,13 +14,19 @@ typedef enum {
   UI_STALE   /* no / expired data */
 } UiStatus;
 
+/* Scale endpoints plus optional caution/warning thresholds on either side.
+ * A `*_lo` limit trips when value <= it; a `*_hi` limit when value >= it.
+ * Each threshold is ignored unless its matching has_* flag is set, so a
+ * one-sided range simply leaves the unused pair zeroed. */
 typedef struct {
-  double lo, hi;
-  double warn, alert;
-  int has_warn, has_alert;
+  double lo, hi;               /* scale endpoints (bar length / dial sweep) */
+  double warn_lo, warn_hi;     /* caution thresholds (amber) */
+  double alert_lo, alert_hi;   /* warning thresholds (red) */
+  int has_warn_lo, has_warn_hi;
+  int has_alert_lo, has_alert_hi;
 } UiRange;
 
-/* Classify `value` against a range's warn/alert limits. */
+/* Classify `value` against a range's caution/warning limits (worst side wins). */
 UiStatus ui_status_for(double value, UiRange range);
 
 /* Theme colour for a status (UI_OK -> normal text, not the `ok` green, so a
@@ -49,15 +55,15 @@ void ui_stat_tile(SDL_Renderer *r, UiRect bounds, const UiTheme *th,
                   int precision);
 
 /* Label + value row, then a horizontal track from range.lo to range.hi with a
- * filled bar to `value` and tick marks at the warn/alert limits. Fill colour
- * follows ui_status_for(value, range). */
+ * filled bar to `value` and tick marks at each caution/warning limit that is
+ * set (either side). Fill colour follows ui_status_for(value, range). */
 void ui_bar_gauge(SDL_Renderer *r, UiRect bounds, const UiTheme *th,
                   const char *label, double value, const char *unit,
                   int precision, UiRange range);
 
 /* Round "steam gauge" dial: a 270-degree scale arc (gap at the bottom) from
  * range.lo at lower-left, clockwise to range.hi at lower-right, with major
- * tick marks, amber/red band arcs at the warn/alert limits, a pointer at
+ * tick marks, amber/red band arcs at each caution/warning limit, a pointer at
  *  `value`, and a digital readout under the hub. `label` sits above the dial.
  * The dial is centred in whatever the box allows after those two text rows. */
 void ui_dial_gauge(SDL_Renderer *r, UiRect bounds, const UiTheme *th,
