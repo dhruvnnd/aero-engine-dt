@@ -137,8 +137,10 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
    * (fill the middle), per-cylinder bars pinned to the bottom. */
   UiRect leftrest;
   UiRect kpibox = ui_split_top(left, 104.0f, 8.0f, &leftrest);
+  UiRect belowenv;
+  UiRect envbox = ui_split_top(leftrest, 74.0f, 8.0f, &belowenv);
   UiRect gaugebox;
-  UiRect cylbox = ui_split_bottom(leftrest, 255.0f, 8.0f, &gaugebox);
+  UiRect cylbox = ui_split_bottom(belowenv, 255.0f, 8.0f, &gaugebox);
 
   UiRect kpi = ui_panel(r, kpibox, th, "secondary");
   UiGrid kg = ui_grid(kpi, 2, 2, 6.0f);
@@ -148,6 +150,18 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
                "kg/h", 2);
   ui_stat_tile(r, ui_grid_at(kg, 3), th, "FUEL PRESS", s->fuel.fuel_press_kpa,
                "kPa", 0);
+
+  /* Flight condition */
+  UiRect ev = ui_panel(r, envbox, th, "environment");
+  UiStack es = ui_stack(ev, 2.0f);
+  ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "outside air temp",
+                 s->env.oat_c, "degC", 1, UI_OK);
+  ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "ambient press",
+                 s->env.ambient_kpa, "kPa", 1, UI_OK);
+  ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "density altitude",
+                 s->env.density_alt_m, "m", 0, UI_OK);
+  ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "true airspeed",
+                 s->env.airspeed_ms, "m/s", 1, UI_OK);
 
   UiRect g = ui_panel(r, gaugebox, th, "gauges");
   UiGrid gg = ui_grid(g, 2, 2, 8.0f);
