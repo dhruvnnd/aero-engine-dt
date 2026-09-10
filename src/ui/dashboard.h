@@ -16,10 +16,12 @@ typedef struct {
   double cht_buf[DASHBOARD_TREND_CAP];
   double egt_buf[DASHBOARD_TREND_CAP];
   double oilp_buf[DASHBOARD_TREND_CAP];
+  double batt_buf[DASHBOARD_TREND_CAP];
   UiHistory rpm_hist;
   UiHistory cht_hist;
   UiHistory egt_hist;
   UiHistory oilp_hist;
+  UiHistory batt_hist;
 } Dashboard;
 
 void dashboard_init(Dashboard *d);
