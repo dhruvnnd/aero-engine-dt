@@ -45,6 +45,22 @@ static double ch_oil_press(const ModelState *s, int i) {
   (void)i;
   return s->lube.oil_press_kpa;
 }
+static double ch_bus_v(const ModelState *s, int i) {
+  (void)i;
+  return s->elec.bus_v;
+}
+static double ch_alt_a(const ModelState *s, int i) {
+  (void)i;
+  return s->elec.alt_current_a;
+}
+static double ch_alt_field_a(const ModelState *s, int i) {
+  (void)i;
+  return s->elec.alt_field_a;
+}
+static double ch_batt_soc(const ModelState *s, int i) {
+  (void)i;
+  return s->elec.batt_soc;
+}
 
 static const ModelChannel CHANNELS[] = {
     {"rpm", "rpm", 2, -1, ch_rpm},
@@ -69,6 +85,10 @@ static const ModelChannel CHANNELS[] = {
     {"lambda_3", "-", 4, 2, ch_cyl_lambda},
     {"lambda_4", "-", 4, 3, ch_cyl_lambda},
     {"oil_press_kpa", "kPa", 2, -1, ch_oil_press},
+    {"bus_v", "V", 3, -1, ch_bus_v},
+    {"alt_a", "A", 2, -1, ch_alt_a},
+    {"alt_field_a", "A", 3, -1, ch_alt_field_a},
+    {"batt_soc", "-", 4, -1, ch_batt_soc},
 };
 
 const ModelChannel *model_channels(int *count) {
