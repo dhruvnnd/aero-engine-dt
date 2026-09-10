@@ -41,6 +41,7 @@ typedef struct {
   double noise_oil_temp_c;
   double noise_oil_press_kpa;
   double noise_fuel_press_kpa;
+  double noise_bus_v;
   double noise_frac; /* fractional 1-sigma for torque, flows, lambda */
   double dropout_probability;
 } SensorConfig;

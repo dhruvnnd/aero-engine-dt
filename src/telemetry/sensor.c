@@ -44,6 +44,7 @@ SensorConfig sensor_config_default(void) {
   cfg.noise_oil_temp_c = 1.0;
   cfg.noise_oil_press_kpa = 4.0;
   cfg.noise_fuel_press_kpa = 3.0;
+  cfg.noise_bus_v = 0.05;
   cfg.noise_frac = 0.008; /* ~0.8% on torque / flows / lambda */
   cfg.dropout_probability = 0.005;
   return cfg;
@@ -121,6 +122,13 @@ void sensor_read_state(Sensor *sensor, const ModelState *truth,
       sensor_noise_frac(sensor, truth->fuel.fuel_flow_kgph, c->noise_frac);
   out->fuel.air_flow_gps +=
       sensor_noise_frac(sensor, truth->fuel.air_flow_gps, c->noise_frac);
+
+  out->elec.bus_v += sensor_gaussian(sensor, c->noise_bus_v);
+  out->elec.alt_current_a +=
+      sensor_noise_frac(sensor, truth->elec.alt_current_a, c->noise_frac);
+  out->elec.alt_field_a +=
+      sensor_noise_frac(sensor, truth->elec.alt_field_a, c->noise_frac);
+  /* batt_soc is a coulomb-counted estimate, not a raw sensor -- left clean. */
 
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     out->cyl[i].cht_c += sensor_gaussian(sensor, c->noise_cht_c);
