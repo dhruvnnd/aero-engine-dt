@@ -33,14 +33,16 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   double load_frac = combustion_load_fraction(state->engine.map_kpa,
                                               state->engine.omega_rad_s);
 
+  double cool_index = 1.0;
+
   thermal_step(&state->thermal, &sync->thermal_config, waste_heat_w, load_frac,
-               ambient_temp_c, sync->sim_time_s, dt);
+               cool_index, ambient_temp_c, sync->sim_time_s, dt);
 
   for (int i = 0; i < sync->engine_config.num_cylinders; i++) {
     cylinder_step(&state->cyl[i], &sync->cyl_config[i], state->engine.map_kpa,
                   state->engine.omega_rad_s, ambient_temp_c,
                   &sync->thermal_config, sync->engine_config.num_cylinders,
-                  sync->sim_time_s, dt);
+                  cool_index, sync->sim_time_s, dt);
   }
 
   sync->sim_time_s += dt;
