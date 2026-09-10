@@ -6,7 +6,8 @@
  */
 
 typedef struct {
-  double relief_valve_kpa;   /* pressure ceiling held by the relief valve */
+  double relief_valve_kpa;   /* pressure the relief valve starts to bleed at */
+  double relief_band_kpa;    /* how far above that pressure can still climb */
   double k_pump_kpa_per_rpm; /* pump gain at the reference oil viscosity */
   double visc_ref_temp_c;    /* oil temp where the viscosity factor is 1.0 */
   double visc_falloff_per_c; /* viscosity factor lost per degC above ref */

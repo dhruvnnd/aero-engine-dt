@@ -1,11 +1,14 @@
 #include "physics/lubrication.h"
 
+#include <math.h>
+
 LubeConfig lube_config_default(void) {
   LubeConfig c;
-  c.relief_valve_kpa = 500.0;    /* ~72 psi relief setting */
-  c.k_pump_kpa_per_rpm = 0.42;   /* tuned: relief at cold cruise, ~150 kPa hot idle */
-  c.visc_ref_temp_c = 15.0;      /* cold-start ambient */
-  c.visc_falloff_per_c = 0.006;  /* ~half viscosity by ~100 degC */
+  c.relief_valve_kpa = 500.0;   /* ~72 psi relief setting */
+  c.relief_band_kpa = 18.0;     /* valve regulation slop above the setpoint */
+  c.k_pump_kpa_per_rpm = 0.42;  /* tuned: on relief at cold cruise, ~150 kPa hot idle */
+  c.visc_ref_temp_c = 15.0;     /* cold-start ambient */
+  c.visc_falloff_per_c = 0.006; /* ~half viscosity by ~100 degC */
   c.bearing_wear = 0.0;
   return c;
 }
@@ -32,8 +35,13 @@ void lube_step(LubeState *state, const LubeConfig *config, double rpm,
   double p = config->k_pump_kpa_per_rpm * rpm *
              viscosity_factor(config, oil_temp_c) / (1.0 + wear);
 
+  /* Soft relief valve: past the setpoint the valve bleeds, so pressure keeps
+   * rising but asymptotes to relief_valve_kpa + relief_band_kpa instead of
+   * hitting a hard corner. */
   if (p > config->relief_valve_kpa) {
-    p = config->relief_valve_kpa;
+    double excess = p - config->relief_valve_kpa;
+    double band = config->relief_band_kpa;
+    p = config->relief_valve_kpa + band * (1.0 - exp(-excess / band));
   }
   if (p < 0.0) {
     p = 0.0;
