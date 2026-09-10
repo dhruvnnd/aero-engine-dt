@@ -55,26 +55,6 @@ static const UiRange RANGE_OIL_PRESS = {.lo = 0.0,
                                         .has_warn_lo = 1,
                                         .has_alert_lo = 1,
                                         .has_warn_hi = 1};
-/* Main bus voltage: both-sided. A sag means the alternator isn't carrying
- * the load; a spike means the regulator is overcharging. */
-static const UiRange RANGE_BUS_V = {.lo = 10.0,
-                                    .hi = 16.0,
-                                    .warn_lo = 12.8,
-                                    .alert_lo = 11.8,
-                                    .warn_hi = 14.9,
-                                    .alert_hi = 15.4,
-                                    .has_warn_lo = 1,
-                                    .has_alert_lo = 1,
-                                    .has_warn_hi = 1,
-                                    .has_alert_hi = 1};
-/* Battery state of charge: one-sided -- how much reserve is left. */
-static const UiRange RANGE_BATT_SOC = {.lo = 0.0,
-                                       .hi = 1.0,
-                                       .warn_lo = 0.35,
-                                       .alert_lo = 0.18,
-                                       .has_warn_lo = 1,
-                                       .has_alert_lo = 1};
-
 /* Air-fuel equivalence ratio, 1.0 = stoichiometric. Lean (>1) or rich (<1)
  * both flag; ~1.55 lean is the misfire edge. */
 static const UiRange RANGE_LAMBDA = {.lo = 0.70,
@@ -95,7 +75,6 @@ void dashboard_init(Dashboard *d) {
   ui_history_init(&d->cht_hist, d->cht_buf, DASHBOARD_TREND_CAP);
   ui_history_init(&d->egt_hist, d->egt_buf, DASHBOARD_TREND_CAP);
   ui_history_init(&d->oilp_hist, d->oilp_buf, DASHBOARD_TREND_CAP);
-  ui_history_init(&d->batt_hist, d->batt_buf, DASHBOARD_TREND_CAP);
 }
 
 void dashboard_sample(Dashboard *d, const ModelState *s) {
@@ -103,7 +82,6 @@ void dashboard_sample(Dashboard *d, const ModelState *s) {
   ui_history_push(&d->cht_hist, s->thermal.cht_c);
   ui_history_push(&d->egt_hist, s->thermal.egt_c);
   ui_history_push(&d->oilp_hist, s->lube.oil_press_kpa);
-  ui_history_push(&d->batt_hist, s->elec.batt_soc * 100.0);
 }
 
 void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
@@ -163,7 +141,7 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
   UiRect trends = ui_split_top_frac(right, 0.6f, 8.0f, &subbox);
 
   UiRect tr = ui_panel(r, trends, th, "trends");
-  UiGrid tg = ui_grid(tr, 1, 5, 6.0f);
+  UiGrid tg = ui_grid(tr, 1, 4, 6.0f);
   ui_sparkline(r, ui_grid_at(tg, 0), th, "RPM", "rpm", 0, &d->rpm_hist,
                RANGE_RPM);
   ui_sparkline(r, ui_grid_at(tg, 1), th, "CHT", "degC", 0, &d->cht_hist,
@@ -172,8 +150,6 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
                RANGE_AUTO);
   ui_sparkline(r, ui_grid_at(tg, 3), th, "OIL P", "kPa", 0, &d->oilp_hist,
                RANGE_OIL_PRESS);
-  ui_sparkline(r, ui_grid_at(tg, 4), th, "BATT", "%", 0, &d->batt_hist,
-               RANGE_AUTO);
 
   /* left column bottom: per-cylinder comparison bars */
   int nc = num_cyl < 1 ? 1
@@ -229,12 +205,4 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
                  max_misfire > 0.5   ? UI_ALERT
                  : max_misfire > 0.0 ? UI_WARN
                                      : UI_OK);
-  ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "bus voltage",
-                 s->elec.bus_v, "V", 1,
-                 ui_status_for(s->elec.bus_v, RANGE_BUS_V));
-  ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "alternator",
-                 s->elec.alt_current_a, "A", 1, UI_OK);
-  ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "battery SoC",
-                 s->elec.batt_soc * 100.0, "%", 0,
-                 ui_status_for(s->elec.batt_soc, RANGE_BATT_SOC));
 }
