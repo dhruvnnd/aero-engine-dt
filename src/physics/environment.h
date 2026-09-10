@@ -28,6 +28,14 @@ typedef struct {
 void environment_state(EnvState *env, double altitude_m, double oat_offset_c,
                        double airspeed_ms);
 
+/* Mission-driven flight condition, fed to model_sync_step each tick. All
+ * zero is sea level, still air, standard ISA temperature. */
+typedef struct {
+  double altitude_m;   /* pressure altitude (ISA), m */
+  double airspeed_ms;  /* true airspeed, m/s */
+  double oat_offset_c; /* outside-air temp minus ISA at that altitude */
+} EnvInput;
+
 double environment_density_altitude_m(double density_kg_m3);
 
 /* Cooling-air-flow index: ~1.0 at sea level and reference cruise airspeed,
