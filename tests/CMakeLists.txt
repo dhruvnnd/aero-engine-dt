@@ -9,6 +9,7 @@ set(ENGINE_CORE_TESTS
   test_combustion
   test_engine_model
   test_thermal
+  test_environment
   test_model_sync
   test_sensor
   test_channels

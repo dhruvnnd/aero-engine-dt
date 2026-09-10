@@ -2,11 +2,12 @@
 
 #include "physics/thermal.h"
 
+/* cool_index 1.0 = reference cooling; the rise formulas are unchanged there. */
 static void run(ThermalState *st, const ThermalConfig *cfg, double q,
                 double load_frac, double amb, double duration_s, double dt) {
   int n = (int)(duration_s / dt + 0.5);
   for (int i = 0; i < n; i++) {
-    thermal_step(st, cfg, q, load_frac, amb, i * dt, dt);
+    thermal_step(st, cfg, q, load_frac, 1.0, amb, i * dt, dt);
   }
 }
 
@@ -85,7 +86,7 @@ static void test_cht_rises_monotonically_to_above_ambient(void) {
   thermal_init(&st, amb);
   double prev = st.cht_c;
   for (int i = 0; i < 3000; i++) {
-    thermal_step(&st, &cfg, 6000.0, 0.7, amb, i * 0.1, 0.1);
+    thermal_step(&st, &cfg, 6000.0, 0.7, 1.0, amb, i * 0.1, 0.1);
     CHECK(st.cht_c >= prev - 1e-9);
     prev = st.cht_c;
   }
