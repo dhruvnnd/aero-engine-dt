@@ -126,13 +126,15 @@ static void cyl_derivative(const double *s, double *ds, double t,
 void cylinder_step(CylinderState *state, const CylinderConfig *config,
                    double map_kpa, double omega_rad_s, double ambient_c,
                    const ThermalConfig *thermal_cfg, int num_cylinders,
-                   double t, double dt) {
+                   double cool_index, double t, double dt) {
   double load_frac = combustion_load_fraction(map_kpa, omega_rad_s);
   double cht_rise = thermal_rise_c(thermal_cfg->cht_rise_rated_c, load_frac);
   double egt_rise = thermal_rise_c(thermal_cfg->egt_rise_rated_c, load_frac);
+  double cool_div = thermal_cool_divisor(cool_index);
 
   CylDerivParams p;
-  p.cht_target_c = ambient_c + cht_rise / cht_cool_factor(config);
+  p.cht_target_c =
+      ambient_c + cht_rise / cht_cool_factor(config) / cool_div;
   p.egt_target_c = ambient_c + egt_rise * egt_trim_factor(config);
   p.cht_tau_s = thermal_cfg->cht_tau_s;
   p.egt_tau_s = thermal_cfg->egt_tau_s;

@@ -32,11 +32,12 @@ void cylinder_state_init(CylinderState *state, double ambient_temp_c);
 
 /* Advances this cylinder's cht_c and egt_c nodes by dt and refreshes its
  * algebraic outputs (lambda, imep_bar, fuel_pw_ms, ca50_deg, misfire_rate).
- */
+ *  `cool_index` (from environment_cool_index) scales head cooling; EGT is
+ * combustion-set and unaffected by it. */
 void cylinder_step(CylinderState *state, const CylinderConfig *config,
                    double map_kpa, double omega_rad_s, double ambient_c,
                    const ThermalConfig *thermal_cfg, int num_cylinders,
-                   double t, double dt);
+                   double cool_index, double t, double dt);
 
 /* This cylinder's contribution to engine indicated torque, N*m: an equal
  * 1/num_cylinders share of combustion_indicated_torque_nm(), scaled by the
