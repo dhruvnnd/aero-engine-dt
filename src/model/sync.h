@@ -5,6 +5,7 @@
 #include "physics/cylinder.h"
 #include "physics/electrical.h"
 #include "physics/engine_model.h"
+#include "physics/environment.h"
 #include "physics/fuel.h"
 #include "physics/lubrication.h"
 #include "physics/thermal.h"
@@ -23,7 +24,6 @@ typedef struct {
 void model_sync_init(ModelSync *sync);
 
 void model_sync_step(ModelSync *sync, ModelState *state,
-                     const EngineInput *input, double ambient_temp_c,
-                     double dt);
+                     const EngineInput *input, const EnvInput *env, double dt);
 
 #endif /* MODEL_SYNC_H */

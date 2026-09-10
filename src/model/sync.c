@@ -22,10 +22,13 @@ void model_sync_init(ModelSync *sync) {
 }
 
 void model_sync_step(ModelSync *sync, ModelState *state,
-                     const EngineInput *input, double ambient_temp_c,
-                     double dt) {
+                     const EngineInput *input, const EnvInput *env, double dt) {
   engine_model_step(&state->engine, &sync->engine_config, input,
                     sync->cyl_config, sync->sim_time_s, dt);
+
+  environment_state(&state->env, env->altitude_m, env->oat_offset_c,
+                    env->airspeed_ms);
+  double ambient_temp_c = state->env.oat_c;
 
   /* Thermal drivers from the current (post-step) operating point: raw waste
    * heat for the oil node, load fraction for the saturating CHT/EGT nodes. */
@@ -34,9 +37,9 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   double load_frac = combustion_load_fraction(state->engine.map_kpa,
                                               state->engine.omega_rad_s);
 
-  environment_state(&state->env, 0.0, ambient_temp_c - 15.0, 0.0);
-
-  double cool_index = 1.0;
+  double cool_index =
+      environment_cool_index(state->env.density_kg_m3, state->env.airspeed_ms,
+                             engine_model_rpm(&state->engine));
 
   thermal_step(&state->thermal, &sync->thermal_config, waste_heat_w, load_frac,
                cool_index, ambient_temp_c, sync->sim_time_s, dt);
