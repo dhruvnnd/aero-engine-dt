@@ -122,11 +122,17 @@ static void usage(FILE *out, const char *argv0) {
   fprintf(out,
           "usage: %s [--profile NAME] [--dt SECONDS] [--duration SECONDS]\n"
           "          [--load NM] [--seed N] [--sensor]\n"
+          "          [--alt M] [--airspeed MS] [--oat-offset C]\n"
           "          [--cyl N:KEY=VAL ...] [--fault-at SECONDS]\n"
           "          [--list] [--help]\n\n"
           "Writes a CSV engine/thermal time-series to stdout; progress and\n"
           "run parameters go to stderr. Add --sensor for the noisy sensor\n"
           "channels alongside ground truth.\n\n"
+          "--alt, --airspeed and --oat-offset pin that flight-condition\n"
+          "  channel to a constant for the whole run, overriding the\n"
+          "  profile's own schedule (throttle still follows the profile).\n"
+          "  --alt is metres ISA, --airspeed is m/s true, --oat-offset is\n"
+          "  degrees C above ISA.\n\n"
           "--cyl sets one cylinder trim (repeatable). N is 1-based; KEY is\n"
           "  inj   injector flow trim   (1.0 nominal)\n"
           "  comp  compression trim     (1.0 nominal)\n"
@@ -230,6 +236,11 @@ int main(int argc, char **argv) {
   int with_sensor = 0;
   double fault_at_s = 0.0;
 
+  /* Env overrides: when *_set, the constant replaces the profile's own
+   * altitude_m(t) / airspeed_ms(t) / ambient_offset_c for the whole run. */
+  double alt_override = 0.0, spd_override = 0.0, oat_override = 0.0;
+  int alt_set = 0, spd_set = 0, oat_set = 0;
+
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
     if ((!strcmp(a, "--profile") || !strcmp(a, "-p")) && i + 1 < argc) {
@@ -252,6 +263,15 @@ int main(int argc, char **argv) {
       }
     } else if (!strcmp(a, "--fault-at") && i + 1 < argc) {
       fault_at_s = atof(argv[++i]);
+    } else if (!strcmp(a, "--alt") && i + 1 < argc) {
+      alt_override = atof(argv[++i]);
+      alt_set = 1;
+    } else if (!strcmp(a, "--airspeed") && i + 1 < argc) {
+      spd_override = atof(argv[++i]);
+      spd_set = 1;
+    } else if (!strcmp(a, "--oat-offset") && i + 1 < argc) {
+      oat_override = atof(argv[++i]);
+      oat_set = 1;
     } else if (!strcmp(a, "--list")) {
       print_profiles(stdout);
       return 0;
@@ -275,6 +295,10 @@ int main(int argc, char **argv) {
     fprintf(stderr, "twin_sim: --dt must be positive\n");
     return 2;
   }
+  if (spd_set && spd_override < 0.0) {
+    fprintf(stderr, "twin_sim: --airspeed must not be negative\n");
+    return 2;
+  }
   if (duration_s < 0.0) {
     duration_s = profile->duration_s;
   }
@@ -282,9 +306,10 @@ int main(int argc, char **argv) {
   ModelSync sync;
   model_sync_init(&sync);
 
-  double alt0 = profile->altitude_m(0.0);
+  double alt0 = alt_set ? alt_override : profile->altitude_m(0.0);
+  double oat_off0 = oat_set ? oat_override : profile->ambient_offset_c;
   AtmosphereState atm0 = environment_isa(alt0);
-  double ambient0_c = (atm0.temperature_k - 273.15) + profile->ambient_offset_c;
+  double ambient0_c = (atm0.temperature_k - 273.15) + oat_off0;
 
   ModelState st;
   model_state_init(&st, &sync.engine_config, ambient0_c);
@@ -299,6 +324,15 @@ int main(int argc, char **argv) {
           with_sensor ? " +sensor" : "");
   if (g_nfaults > 0) {
     fprintf(stderr, " faults=%d@%.0fs", g_nfaults, fault_at_s);
+  }
+  if (alt_set) {
+    fprintf(stderr, " alt=%.0fm", alt_override);
+  }
+  if (spd_set) {
+    fprintf(stderr, " airspeed=%.1fm/s", spd_override);
+  }
+  if (oat_set) {
+    fprintf(stderr, " oat_offset=%+.1fC", oat_override);
   }
   fprintf(stderr, "\n");
 
@@ -326,14 +360,15 @@ int main(int argc, char **argv) {
       faults_applied = 1;
     }
 
-    double alt_m = profile->altitude_m(t);
-    double airspeed_ms = profile->airspeed_ms(t);
+    double alt_m = alt_set ? alt_override : profile->altitude_m(t);
+    double airspeed_ms = spd_set ? spd_override : profile->airspeed_ms(t);
+    double oat_off = oat_set ? oat_override : profile->ambient_offset_c;
     AtmosphereState atm = environment_isa(alt_m);
-    double ambient_c = (atm.temperature_k - 273.15) + profile->ambient_offset_c;
+    double ambient_c = (atm.temperature_k - 273.15) + oat_off;
     double throttle = profile->throttle(t);
 
     EnvState env_now;
-    environment_state(&env_now, alt_m, profile->ambient_offset_c, airspeed_ms);
+    environment_state(&env_now, alt_m, oat_off, airspeed_ms);
     double cool_index =
         environment_cool_index(env_now.density_kg_m3, airspeed_ms, st.rpm);
 
@@ -360,7 +395,7 @@ int main(int argc, char **argv) {
       EnvInput env_in;
       env_in.altitude_m = alt_m;
       env_in.airspeed_ms = airspeed_ms;
-      env_in.oat_offset_c = profile->ambient_offset_c;
+      env_in.oat_offset_c = oat_off;
       model_sync_step(&sync, &st, &in, &env_in, dt);
     }
   }
