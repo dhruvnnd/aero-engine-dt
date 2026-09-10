@@ -37,11 +37,14 @@ static bool sensor_channel_dropped(Sensor *sensor) {
 
 SensorConfig sensor_config_default(void) {
   SensorConfig cfg;
-  cfg.noise_rpm = 5.0;
+  cfg.noise_rpm = 12.0; /* visible tach wander; also stands in for firing ripple */
   cfg.noise_map_kpa = 0.3;
   cfg.noise_cht_c = 1.5;
   cfg.noise_egt_c = 4.0;
   cfg.noise_oil_temp_c = 1.0;
+  cfg.noise_oil_press_kpa = 4.0;
+  cfg.noise_fuel_press_kpa = 3.0;
+  cfg.noise_frac = 0.008; /* ~0.8% on torque / flows / lambda */
   cfg.dropout_probability = 0.005;
   return cfg;
 }
@@ -88,4 +91,40 @@ SensorReading sensor_read(Sensor *sensor, const ModelState *truth) {
   }
 
   return r;
+}
+
+/* Additive noise of `frac` of |v|'s magnitude, in v's own units. */
+static double sensor_noise_frac(Sensor *sensor, double v, double frac) {
+  return sensor_gaussian(sensor, fabs(v) * frac);
+}
+
+void sensor_read_state(Sensor *sensor, const ModelState *truth,
+                       ModelState *out) {
+  const SensorConfig *c = &sensor->config;
+
+  *out = *truth;
+
+  out->rpm += sensor_gaussian(sensor, c->noise_rpm);
+  out->torque_nm += sensor_noise_frac(sensor, truth->torque_nm, c->noise_frac);
+
+  out->engine.map_kpa += sensor_gaussian(sensor, c->noise_map_kpa);
+
+  out->thermal.cht_c += sensor_gaussian(sensor, c->noise_cht_c);
+  out->thermal.egt_c += sensor_gaussian(sensor, c->noise_egt_c);
+  out->thermal.oil_temp_c += sensor_gaussian(sensor, c->noise_oil_temp_c);
+
+  out->lube.oil_press_kpa += sensor_gaussian(sensor, c->noise_oil_press_kpa);
+
+  out->fuel.fuel_press_kpa +=
+      sensor_gaussian(sensor, c->noise_fuel_press_kpa);
+  out->fuel.fuel_flow_kgph +=
+      sensor_noise_frac(sensor, truth->fuel.fuel_flow_kgph, c->noise_frac);
+  out->fuel.air_flow_gps +=
+      sensor_noise_frac(sensor, truth->fuel.air_flow_gps, c->noise_frac);
+
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    out->cyl[i].cht_c += sensor_gaussian(sensor, c->noise_cht_c);
+    out->cyl[i].egt_c += sensor_gaussian(sensor, c->noise_egt_c);
+    out->cyl[i].lambda += sensor_gaussian(sensor, c->noise_frac);
+  }
 }

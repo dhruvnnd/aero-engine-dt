@@ -39,6 +39,9 @@ typedef struct {
   double noise_cht_c;
   double noise_egt_c;
   double noise_oil_temp_c;
+  double noise_oil_press_kpa;
+  double noise_fuel_press_kpa;
+  double noise_frac; /* fractional 1-sigma for torque, flows, lambda */
   double dropout_probability;
 } SensorConfig;
 
@@ -60,5 +63,13 @@ void sensor_init(Sensor *sensor, const SensorConfig *config, uint32_t seed);
  * noise added, and is then independently dropped with probability
  * config.dropout_probability. */
 SensorReading sensor_read(Sensor *sensor, const ModelState *truth);
+
+/* Fills `out` with a copy of `truth` in which every displayed channel
+ * (engine, thermal, fuel, lube, per-cylinder) carries additive Gaussian
+ * noise -- the "instrument feed" a dashboard shows instead of the exact
+ * model state. No dropout; misfire_rate and other derived fields are left
+ * as-is. */
+void sensor_read_state(Sensor *sensor, const ModelState *truth,
+                       ModelState *out);
 
 #endif /* TELEMETRY_SENSOR_H */
