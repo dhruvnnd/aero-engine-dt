@@ -4,12 +4,14 @@
 #include "physics/cylinder.h"
 #include "physics/engine_model.h"
 #include "physics/fuel.h"
+#include "physics/lubrication.h"
 #include "physics/thermal.h"
 
 typedef struct {
   EngineState engine;   /* omega_rad_s, map_kpa */
   ThermalState thermal; /* cht_c, egt_c, oil_temp_c (engine-wide) */
   FuelState fuel;       /* air_flow_gps, fuel_flow_kgph, fuel_press_kpa */
+  LubeState lube;       /* oil_press_kpa */
 
   CylinderState cyl[ENGINE_MAX_CYLINDERS];
 
