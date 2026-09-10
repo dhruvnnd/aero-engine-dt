@@ -28,9 +28,11 @@ void dashboard_init(Dashboard *d);
  * (e.g. a few Hz), not once per render frame. */
 void dashboard_sample(Dashboard *d, const ModelState *s);
 
-/* Render the whole screen into a `w` x `h` logical area */
+/* Render the whole screen into a `w` x `h` logical area. `sensor_mode` is
+ * purely for the header marker -- non-zero when `s` is the noisy instrument
+ * feed, zero when it is the exact model state. */
 void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
                     const ModelState *s, int num_cyl, double throttle,
-                    double sim_time_s, float fps);
+                    double sim_time_s, float fps, int sensor_mode);
 
 #endif /* UI_DASHBOARD_H */

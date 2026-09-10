@@ -86,7 +86,7 @@ void dashboard_sample(Dashboard *d, const ModelState *s) {
 
 void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
                     const ModelState *s, int num_cyl, double throttle,
-                    double sim_time_s, float fps) {
+                    double sim_time_s, float fps, int sensor_mode) {
   const UiTheme *th = &d->theme;
 
   ui_fill(r, (UiRect){0.0f, 0.0f, w, h}, th->bg);
@@ -95,7 +95,8 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
   UiRect rest;
   UiRect header = ui_split_top(screen, 14.0f, 6.0f, &rest);
   ui_text(r, header.x, header.y, th->text_bright,
-          "aero engine digital twin (%d)", SDL_GetVersion());
+          "aero engine digital twin (%d)   %s", SDL_GetVersion(),
+          sensor_mode ? "[sensor]" : "[model]");
   ui_text_right(r, header.x + header.w, header.y, th->text_dim,
                 "T+%07.1fs   THR %3.0f%%   %2.0f FPS", sim_time_s,
                 throttle * 100.0, (double)fps);
@@ -103,7 +104,8 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
 
   UiRect body;
   UiRect footer = ui_split_bottom(rest, 10.0f, 6.0f, &body);
-  ui_text(r, footer.x, footer.y, th->text_dim, "UP/DN or W/S  throttle");
+  ui_text(r, footer.x, footer.y, th->text_dim,
+          "UP/DN or W/S  throttle      M  sensor / model");
 
   UiRect right;
   UiRect left = ui_split_left_frac(body, 0.42f, 8.0f, &right);
