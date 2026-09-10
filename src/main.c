@@ -11,9 +11,14 @@
 #include "platform/sdl/sdl_window.h"
 #include "telemetry/sensor.h"
 #include "ui/dashboard.h"
+#include "ui/gamepad_panel.h"
 
 #define WIN_W 1000
 #define WIN_H 680
+
+/* Companion window that shows the gamepad bindings + live input state. */
+#define GP_WIN_W 500
+#define GP_WIN_H 600
 
 /* Trend sampling cadence -- the histories advance at this rate regardless of
  * render frame rate. */
@@ -24,6 +29,8 @@
 
 typedef struct {
   SdlWindowContext window_ctx;
+  SdlWindowContext gamepad_ctx; /* companion panel; window == NULL if it failed */
+  bool gamepad_win_shown;
   SdlFrameTimer timer;
 
   ModelSync sync;
@@ -52,6 +59,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     return SDL_APP_FAILURE;
   }
 
+  /* Optional -- the sim runs fine without it, so a failure here is not fatal. */
+  if (sdl_window_init(&app->gamepad_ctx, "aero engine dt | gamepad", GP_WIN_W,
+                      GP_WIN_H)) {
+    app->gamepad_win_shown = true;
+  } else {
+    SDL_Log("gamepad panel window unavailable: %s", SDL_GetError());
+    app->gamepad_ctx.window = NULL;
+    app->gamepad_ctx.renderer = NULL;
+    app->gamepad_win_shown = false;
+  }
+
   model_sync_init(&app->sync);
 
   AtmosphereState atm = environment_isa(0.0);
@@ -77,12 +95,38 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   if (event->type == SDL_EVENT_QUIT) {
     return SDL_APP_SUCCESS;
   }
+
+  /* Closing the gamepad panel just dismisses it; closing the main window (or
+   * any other) quits. Handled explicitly so a second open window doesn't stop
+   * the last-window-closed quit from reaching us. */
+  if (event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+    if (app->gamepad_ctx.window &&
+        event->window.windowID == SDL_GetWindowID(app->gamepad_ctx.window)) {
+      SDL_HideWindow(app->gamepad_ctx.window);
+      app->gamepad_win_shown = false;
+      return SDL_APP_CONTINUE;
+    }
+    return SDL_APP_SUCCESS;
+  }
+
   if ((event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
        event->key.key == SDLK_M) ||
       (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
        event->gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)) {
     app->sensor_mode = !app->sensor_mode;
   }
+
+  if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+      event->key.key == SDLK_G && app->gamepad_ctx.window) {
+    app->gamepad_win_shown = !app->gamepad_win_shown;
+    if (app->gamepad_win_shown) {
+      SDL_ShowWindow(app->gamepad_ctx.window);
+      SDL_RaiseWindow(app->gamepad_ctx.window);
+    } else {
+      SDL_HideWindow(app->gamepad_ctx.window);
+    }
+  }
+
   sdl_input_handle_event(&app->input, event);
   return SDL_APP_CONTINUE;
 }
@@ -128,6 +172,16 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                  app->sync.sim_time_s, fps, app->sensor_mode);
 
   SDL_RenderPresent(renderer);
+
+  if (app->gamepad_ctx.window && app->gamepad_win_shown) {
+    SDL_Renderer *gr = app->gamepad_ctx.renderer;
+    SDL_SetRenderDrawColor(gr, 10, 14, 12, SDL_ALPHA_OPAQUE);
+    SDL_RenderClear(gr);
+    gamepad_panel_draw(gr, (float)GP_WIN_W, (float)GP_WIN_H, app->input.pad,
+                       app->input.throttle);
+    SDL_RenderPresent(gr);
+  }
+
   return SDL_APP_CONTINUE;
 }
 
@@ -135,5 +189,8 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   (void)result;
   AppState *app = (AppState *)appstate;
   sdl_input_shutdown(&app->input);
+  if (app->gamepad_ctx.window) {
+    sdl_window_shutdown(&app->gamepad_ctx);
+  }
   sdl_window_shutdown(&app->window_ctx);
 }
