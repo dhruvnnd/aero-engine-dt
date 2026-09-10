@@ -2,6 +2,7 @@
 
 #include "physics/combustion.h"
 #include "physics/cylinder.h"
+#include "physics/electrical.h"
 #include "physics/engine_model.h"
 #include "physics/fuel.h"
 #include "physics/lubrication.h"
@@ -12,6 +13,7 @@ void model_sync_init(ModelSync *sync) {
   sync->thermal_config = thermal_config_default();
   sync->fuel_config = fuel_config_default();
   sync->lube_config = lube_config_default();
+  sync->elec_config = elec_config_default();
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     sync->cyl_config[i] = cylinder_config_default();
   }
@@ -58,4 +60,7 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   /* Oil pressure from the settled crank speed and current oil temperature. */
   lube_step(&state->lube, &sync->lube_config, state->rpm,
             state->thermal.oil_temp_c);
+
+  /* Charging system from the settled crank speed. */
+  elec_step(&state->elec, &sync->elec_config, state->rpm, dt);
 }

@@ -3,6 +3,7 @@
 
 #include "model/state.h"
 #include "physics/cylinder.h"
+#include "physics/electrical.h"
 #include "physics/engine_model.h"
 #include "physics/fuel.h"
 #include "physics/lubrication.h"
@@ -13,6 +14,7 @@ typedef struct {
   ThermalConfig thermal_config;
   FuelConfig fuel_config;
   LubeConfig lube_config;
+  ElecConfig elec_config;
   CylinderConfig cyl_config[ENGINE_MAX_CYLINDERS]; /* one per cylinder slot */
   double sim_time_s; /* accumulated simulated time, passed to the integrators */
 } ModelSync;
