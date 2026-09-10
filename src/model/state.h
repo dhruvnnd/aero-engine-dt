@@ -2,6 +2,7 @@
 #define MODEL_STATE_H
 
 #include "physics/cylinder.h"
+#include "physics/electrical.h"
 #include "physics/engine_model.h"
 #include "physics/fuel.h"
 #include "physics/lubrication.h"
@@ -12,6 +13,7 @@ typedef struct {
   ThermalState thermal; /* cht_c, egt_c, oil_temp_c (engine-wide) */
   FuelState fuel;       /* air_flow_gps, fuel_flow_kgph, fuel_press_kpa */
   LubeState lube;       /* oil_press_kpa */
+  ElecState elec;       /* bus_v, alt_current_a, alt_field_a, batt_soc */
 
   CylinderState cyl[ENGINE_MAX_CYLINDERS];
 
