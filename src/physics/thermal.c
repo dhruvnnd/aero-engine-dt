@@ -14,6 +14,7 @@ enum {
 typedef struct {
   double waste_heat_w;
   double load_frac;
+  double cool_div;
   double ambient_temp_c;
   double cht_tau_s;
   double egt_tau_s;
@@ -37,10 +38,22 @@ double thermal_rise_c(double rise_rated_c, double load_frac) {
   return rise_rated_c * sqrt(lf);
 }
 
-/* Oil target: linear in raw waste heat (slow bulk sink, no saturation). */
+double thermal_cool_divisor(double cool_index) {
+  double c = cool_index;
+  if (c < 0.05) {
+    c = 0.05;
+  }
+  if (c > 4.0) {
+    c = 4.0;
+  }
+  return sqrt(c);
+}
+
+/* Oil target: linear in raw waste heat (slow bulk sink, no saturation),
+ * scaled by cooling airflow -- the oil cooler sees ram air too. */
 static double oil_target_c(double gain_c_per_w, double waste_heat_w,
-                           double ambient_temp_c) {
-  return ambient_temp_c + gain_c_per_w * waste_heat_w;
+                           double cool_div, double ambient_temp_c) {
+  return ambient_temp_c + gain_c_per_w * waste_heat_w / cool_div;
 }
 
 static void thermal_derivative(const double *state, double *dstate, double t,
@@ -53,14 +66,16 @@ static void thermal_derivative(const double *state, double *dstate, double t,
   double oil = state[THERMAL_STATE_OIL];
 
   double cht_target =
-      p->ambient_temp_c + thermal_rise_c(p->cht_rise_rated_c, p->load_frac);
+      p->ambient_temp_c +
+      thermal_rise_c(p->cht_rise_rated_c, p->load_frac) / p->cool_div;
   double egt_target =
       p->ambient_temp_c + thermal_rise_c(p->egt_rise_rated_c, p->load_frac);
 
   dstate[THERMAL_STATE_CHT] = (cht_target - cht) / p->cht_tau_s;
   dstate[THERMAL_STATE_EGT] = (egt_target - egt) / p->egt_tau_s;
   dstate[THERMAL_STATE_OIL] =
-      (oil_target_c(p->oil_gain_c_per_w, p->waste_heat_w, p->ambient_temp_c) -
+      (oil_target_c(p->oil_gain_c_per_w, p->waste_heat_w, p->cool_div,
+                    p->ambient_temp_c) -
        oil) /
       p->oil_tau_s;
 }
@@ -83,14 +98,15 @@ void thermal_init(ThermalState *state, double ambient_temp_c) {
 }
 
 void thermal_step(ThermalState *state, const ThermalConfig *config,
-                  double waste_heat_w, double load_frac, double ambient_temp_c,
-                  double t, double dt) {
+                  double waste_heat_w, double load_frac, double cool_index,
+                  double ambient_temp_c, double t, double dt) {
   double vec[THERMAL_STATE_COUNT] = {state->cht_c, state->egt_c,
                                      state->oil_temp_c};
 
   ThermalDerivParams params;
   params.waste_heat_w = waste_heat_w;
   params.load_frac = load_frac;
+  params.cool_div = thermal_cool_divisor(cool_index);
   params.ambient_temp_c = ambient_temp_c;
   params.cht_tau_s = config->cht_tau_s;
   params.egt_tau_s = config->egt_tau_s;

@@ -28,13 +28,19 @@ ThermalConfig thermal_config_default(void);
  * physics/cylinder.c so they stay consistent. */
 double thermal_rise_c(double rise_rated_c, double load_frac);
 
+/* Divisor applied to the CHT and oil rises for a cooling-air-flow index.
+ * 1.0 at reference cooling; >1 when cooling is strong (fast/dense air),
+ * <1 when it's weak (slow/thin air) */
+double thermal_cool_divisor(double cool_index);
+
 /* Sets all three temperatures to ambient (cold start). */
 void thermal_init(ThermalState *state, double ambient_temp_c);
 
 /* Advances state by dt seconds. `waste_heat_w` drives the oil node;
- * `load_frac` (0..1, from combustion_load_fraction) drives CHT and EGT. */
+ *  `load_frac` (0..1, from combustion_load_fraction) drives CHT and EGT;
+ *  `cool_index` (from environment_cool_index) scales CHT and oil cooling. */
 void thermal_step(ThermalState *state, const ThermalConfig *config,
-                  double waste_heat_w, double load_frac, double ambient_temp_c,
-                  double t, double dt);
+                  double waste_heat_w, double load_frac, double cool_index,
+                  double ambient_temp_c, double t, double dt);
 
 #endif /* PHYSICS_THERMAL_H */
