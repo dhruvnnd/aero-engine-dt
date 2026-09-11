@@ -3,7 +3,9 @@
 
 #include <SDL3/SDL.h>
 
-void gamepad_panel_draw(SDL_Renderer *r, float w, float h, SDL_Gamepad *pad,
-                        double throttle);
+#include "platform/sdl/sdl_input.h"
+
+void gamepad_panel_draw(SDL_Renderer *r, float w, float h,
+                        const SdlInputState *input);
 
 #endif /* UI_GAMEPAD_PANEL_H */

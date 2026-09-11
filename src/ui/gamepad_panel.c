@@ -5,9 +5,17 @@
 #include "ui/ui_theme.h"
 #include "ui/ui_widgets.h"
 
+/* Full-scale spans for the little bar read-outs (no caution/warning bands --
+ * this window just mirrors the raw stick/trigger travel and the resolved
+ * flight condition, not an operating limit). */
 static const UiRange RANGE_STICK = {.lo = -1.0, .hi = 1.0};
 static const UiRange RANGE_UNIT = {.lo = 0.0, .hi = 1.0};
+static const UiRange RANGE_ALT = {.lo = 0.0, .hi = 12000.0};
+static const UiRange RANGE_SPD = {.lo = 0.0, .hi = 120.0};
+static const UiRange RANGE_OAT = {.lo = -40.0, .hi = 50.0};
 
+/* control, action, keyboard equivalent. Mirrors sdl_input.c's read path plus
+ * the sensor/model toggle handled in main.c's SDL_AppEvent. */
 static const char *const BIND_ROWS[][3] = {
     {"R-TRIGGER", "hold throttle at trigger pos", ""},
     {"L-STICK UP", "open throttle", "Up / W"},
@@ -17,6 +25,13 @@ static const char *const BIND_ROWS[][3] = {
     {"R-SHOULDER", "snap fully open", "Home"},
     {"L-SHOULDER", "snap fully closed", "End"},
     {"Y / NORTH", "toggle sensor / model feed", "M"},
+    {"R-STICK UP", "climb", "Page Up"},
+    {"R-STICK DN", "descend", "Page Dn"},
+    {"R-STICK RIGHT", "speed up", "]"},
+    {"R-STICK LEFT", "slow down", "["},
+    {"D-PAD RIGHT", "OAT offset up", "="},
+    {"D-PAD LEFT", "OAT offset down", "-"},
+    {"BACK", "reset flight condition", "R"},
 };
 
 static double axis_unit(SDL_Gamepad *pad, SDL_GamepadAxis axis) {
@@ -37,9 +52,10 @@ static void flag_row(SDL_Renderer *r, UiRect row, const UiTheme *th,
                 on ? "[ HELD ]" : "[  --  ]");
 }
 
-void gamepad_panel_draw(SDL_Renderer *r, float w, float h, SDL_Gamepad *pad,
-                        double throttle) {
+void gamepad_panel_draw(SDL_Renderer *r, float w, float h,
+                        const SdlInputState *input) {
   const UiTheme th = ui_theme_default();
+  SDL_Gamepad *pad = input->pad;
 
   ui_fill(r, (UiRect){0.0f, 0.0f, w, h}, th.bg);
   UiRect screen = ui_rect_inset((UiRect){0.0f, 0.0f, w, h}, 8.0f, 8.0f);
@@ -69,36 +85,60 @@ void gamepad_panel_draw(SDL_Renderer *r, float w, float h, SDL_Gamepad *pad,
   } else {
     ui_text(r, dev.x, dev.y, th.warn, "no controller attached");
     ui_text(r, dev.x, dev.y + 10.0f, th.text_dim,
-            "keyboard throttle control is active");
+            "keyboard control is active");
   }
 
-  /* live input */
-  UiRect livebox = ui_split_top(rest, 220.0f, 8.0f, &rest);
-  UiRect live = ui_panel(r, livebox, &th, "live input");
-  UiStack ls = ui_stack(live, 4.0f);
-  ui_bar_gauge(r, ui_stack_row(&ls, 30.0f), &th, "L-STICK Y (up +)",
+  /* throttle */
+  UiRect throttlebox = ui_split_top(rest, 220.0f, 8.0f, &rest);
+  UiRect thr = ui_panel(r, throttlebox, &th, "throttle input");
+  UiStack ts = ui_stack(thr, 4.0f);
+  ui_bar_gauge(r, ui_stack_row(&ts, 30.0f), &th, "L-STICK Y (up +)",
                -axis_unit(pad, SDL_GAMEPAD_AXIS_LEFTY), "", 2, RANGE_STICK);
-  ui_bar_gauge(r, ui_stack_row(&ls, 30.0f), &th, "R-TRIGGER",
+  ui_bar_gauge(r, ui_stack_row(&ts, 30.0f), &th, "R-TRIGGER",
                axis_unit(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), "", 2,
                RANGE_UNIT);
-  ui_bar_gauge(r, ui_stack_row(&ls, 30.0f), &th, "-> THROTTLE OUT", throttle,
-               "", 2, RANGE_UNIT);
-  flag_row(r, ui_stack_row(&ls, th.row_h), &th, "left shoulder",
+  ui_bar_gauge(r, ui_stack_row(&ts, 30.0f), &th, "-> THROTTLE OUT",
+               input->throttle, "", 2, RANGE_UNIT);
+  flag_row(r, ui_stack_row(&ts, th.row_h), &th, "left shoulder",
            held(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER));
-  flag_row(r, ui_stack_row(&ls, th.row_h), &th, "right shoulder",
+  flag_row(r, ui_stack_row(&ts, th.row_h), &th, "right shoulder",
            held(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER));
-  flag_row(r, ui_stack_row(&ls, th.row_h), &th, "d-pad up",
+  flag_row(r, ui_stack_row(&ts, th.row_h), &th, "d-pad up",
            held(pad, SDL_GAMEPAD_BUTTON_DPAD_UP));
-  flag_row(r, ui_stack_row(&ls, th.row_h), &th, "d-pad down",
+  flag_row(r, ui_stack_row(&ts, th.row_h), &th, "d-pad down",
            held(pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN));
-  flag_row(r, ui_stack_row(&ls, th.row_h), &th, "Y (north)",
+  flag_row(r, ui_stack_row(&ts, th.row_h), &th, "Y (north)",
            held(pad, SDL_GAMEPAD_BUTTON_NORTH));
+
+  /* flight condition */
+  UiRect envbox = ui_split_top(rest, 210.0f, 8.0f, &rest);
+  UiRect env = ui_panel(r, envbox, &th, "flight condition input");
+  UiStack es = ui_stack(env, 4.0f);
+  ui_bar_gauge(r, ui_stack_row(&es, 30.0f), &th, "R-STICK Y (up +)",
+               -axis_unit(pad, SDL_GAMEPAD_AXIS_RIGHTY), "", 2, RANGE_STICK);
+  ui_bar_gauge(r, ui_stack_row(&es, 30.0f), &th, "R-STICK X (right +)",
+               axis_unit(pad, SDL_GAMEPAD_AXIS_RIGHTX), "", 2, RANGE_STICK);
+  flag_row(r, ui_stack_row(&es, th.row_h), &th, "d-pad right",
+           held(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT));
+  flag_row(r, ui_stack_row(&es, th.row_h), &th, "d-pad left",
+           held(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT));
+  flag_row(r, ui_stack_row(&es, th.row_h), &th, "back (reset)",
+           held(pad, SDL_GAMEPAD_BUTTON_BACK));
+  ui_reading_row(r, ui_stack_row(&es, th.row_h), &th, "-> altitude",
+                input->altitude_m, "m", 0,
+                ui_status_for(input->altitude_m, RANGE_ALT));
+  ui_reading_row(r, ui_stack_row(&es, th.row_h), &th, "-> airspeed",
+                input->airspeed_ms, "m/s", 1,
+                ui_status_for(input->airspeed_ms, RANGE_SPD));
+  ui_reading_row(r, ui_stack_row(&es, th.row_h), &th, "-> OAT offset",
+                input->oat_offset_c, "degC", 1,
+                ui_status_for(input->oat_offset_c, RANGE_OAT));
 
   /* bindings */
   UiRect bind = ui_panel(r, rest, &th, "bindings");
   const float c1 = bind.x;
-  const float c2 = bind.x + 12.0f * UI_GLYPH_W;
-  const float c3 = bind.x + 42.0f * UI_GLYPH_W;
+  const float c2 = bind.x + 15.0f * UI_GLYPH_W;
+  const float c3 = bind.x + 45.0f * UI_GLYPH_W;
   ui_text(r, c1, bind.y, th.text_dim, "CONTROL");
   ui_text(r, c2, bind.y, th.text_dim, "ACTION");
   ui_text(r, c3, bind.y, th.text_dim, "KEYS");
