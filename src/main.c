@@ -18,8 +18,8 @@
 #define WIN_H 680
 
 /* Companion window that shows the gamepad bindings + live input state. */
-#define GP_WIN_W 500
-#define GP_WIN_H 600
+#define GP_WIN_W 540
+#define GP_WIN_H 860
 
 /* Trend sampling cadence -- the histories advance at this rate regardless of
  * render frame rate. */
@@ -196,8 +196,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     SDL_Renderer *gr = app->gamepad_ctx.renderer;
     SDL_SetRenderDrawColor(gr, 10, 14, 12, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(gr);
-    gamepad_panel_draw(gr, (float)GP_WIN_W, (float)GP_WIN_H, app->input.pad,
-                       app->input.throttle);
+    gamepad_panel_draw(gr, (float)GP_WIN_W, (float)GP_WIN_H, &app->input);
     SDL_RenderPresent(gr);
   }
 
