@@ -24,8 +24,11 @@ static double axis_frac(Sint16 value) {
   return (double)value / (double)SDL_JOYSTICK_AXIS_MAX;
 }
 
-static void update_env(SdlInputState *input, const bool *keys, double dt) {
-  if (keys[SDL_SCANCODE_R]) {
+static void update_env(SdlInputState *input, const bool *keys, SDL_Gamepad *pad,
+                       double dt) {
+  bool reset = keys[SDL_SCANCODE_R] ||
+               (pad && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK));
+  if (reset) {
     input->altitude_m = 0.0;
     input->airspeed_ms = 0.0;
     input->oat_offset_c = 0.0;
@@ -38,13 +41,6 @@ static void update_env(SdlInputState *input, const bool *keys, double dt) {
   if (keys[SDL_SCANCODE_PAGEDOWN]) {
     alt_dir -= 1.0;
   }
-  input->altitude_m += alt_dir * SDL_INPUT_ALT_RATE_M_PER_S * dt;
-  if (input->altitude_m < 0.0) {
-    input->altitude_m = 0.0;
-  }
-  if (input->altitude_m > SDL_INPUT_ALT_MAX_M) {
-    input->altitude_m = SDL_INPUT_ALT_MAX_M;
-  }
 
   double spd_dir = 0.0;
   if (keys[SDL_SCANCODE_RIGHTBRACKET]) {
@@ -52,13 +48,6 @@ static void update_env(SdlInputState *input, const bool *keys, double dt) {
   }
   if (keys[SDL_SCANCODE_LEFTBRACKET]) {
     spd_dir -= 1.0;
-  }
-  input->airspeed_ms += spd_dir * SDL_INPUT_SPD_RATE_MS_PER_S * dt;
-  if (input->airspeed_ms < 0.0) {
-    input->airspeed_ms = 0.0;
-  }
-  if (input->airspeed_ms > SDL_INPUT_SPD_MAX_MS) {
-    input->airspeed_ms = SDL_INPUT_SPD_MAX_MS;
   }
 
   double oat_dir = 0.0;
@@ -68,6 +57,64 @@ static void update_env(SdlInputState *input, const bool *keys, double dt) {
   if (keys[SDL_SCANCODE_MINUS]) {
     oat_dir -= 1.0;
   }
+
+  if (pad) {
+    double stick_y =
+        -axis_frac(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY));
+    if (stick_y > SDL_INPUT_STICK_DEADZONE) {
+      alt_dir += 1.0;
+    } else if (stick_y < -SDL_INPUT_STICK_DEADZONE) {
+      alt_dir -= 1.0;
+    }
+
+    double stick_x =
+        axis_frac(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX));
+    if (stick_x > SDL_INPUT_STICK_DEADZONE) {
+      spd_dir += 1.0;
+    } else if (stick_x < -SDL_INPUT_STICK_DEADZONE) {
+      spd_dir -= 1.0;
+    }
+
+    if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
+      oat_dir += 1.0;
+    }
+    if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) {
+      oat_dir -= 1.0;
+    }
+  }
+
+  if (alt_dir > 1.0) {
+    alt_dir = 1.0;
+  } else if (alt_dir < -1.0) {
+    alt_dir = -1.0;
+  }
+  if (spd_dir > 1.0) {
+    spd_dir = 1.0;
+  } else if (spd_dir < -1.0) {
+    spd_dir = -1.0;
+  }
+  if (oat_dir > 1.0) {
+    oat_dir = 1.0;
+  } else if (oat_dir < -1.0) {
+    oat_dir = -1.0;
+  }
+
+  input->altitude_m += alt_dir * SDL_INPUT_ALT_RATE_M_PER_S * dt;
+  if (input->altitude_m < 0.0) {
+    input->altitude_m = 0.0;
+  }
+  if (input->altitude_m > SDL_INPUT_ALT_MAX_M) {
+    input->altitude_m = SDL_INPUT_ALT_MAX_M;
+  }
+
+  input->airspeed_ms += spd_dir * SDL_INPUT_SPD_RATE_MS_PER_S * dt;
+  if (input->airspeed_ms < 0.0) {
+    input->airspeed_ms = 0.0;
+  }
+  if (input->airspeed_ms > SDL_INPUT_SPD_MAX_MS) {
+    input->airspeed_ms = SDL_INPUT_SPD_MAX_MS;
+  }
+
   input->oat_offset_c += oat_dir * SDL_INPUT_OAT_RATE_C_PER_S * dt;
   if (input->oat_offset_c < SDL_INPUT_OAT_MIN_C) {
     input->oat_offset_c = SDL_INPUT_OAT_MIN_C;
@@ -143,7 +190,7 @@ void sdl_input_update(SdlInputState *input, double dt) {
   const bool *keys = SDL_GetKeyboardState(NULL);
   SDL_Gamepad *pad = input->pad;
 
-  update_env(input, keys, dt);
+  update_env(input, keys, pad, dt);
 
   bool snap_open = keys[SDL_SCANCODE_HOME];
   bool snap_closed = keys[SDL_SCANCODE_END];

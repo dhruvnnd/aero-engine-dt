@@ -36,10 +36,10 @@ void sdl_input_handle_event(SdlInputState *input, const SDL_Event *event);
  *   End ......... left shoulder ................. snap fully closed
  *               ( right trigger ) .............. hold the lever at the
  *                                                trigger's own position
- *   Page Up/Down ................................ climb / descend
- *   [ / ] ........................................ slow down / speed up
- *   - / = ........................................ OAT offset down / up
- *   R ............................................ reset flight condition
+ *   Page Up/Down ... right stick Y (up +) ........ climb / descend
+ *   [ / ] .......... right stick X (right +) ..... slow down / speed up
+ *   - / = .......... D-pad Left / Right ........... OAT offset down / up
+ *   R .............. Back ......................... reset flight condition
  *
  * Call once per frame. SDL_AppIterate runs after event delivery, so both
  * input snapshots are already current there. */
