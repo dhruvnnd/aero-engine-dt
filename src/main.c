@@ -157,15 +157,17 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   sdl_input_update(&app->input, dt);
 
+  EnvInput env_in;
+  env_in.altitude_m = app->input.altitude_m;
+  env_in.airspeed_ms = app->input.airspeed_ms;
+  env_in.oat_offset_c = app->input.oat_offset_c;
+  AtmosphereState atm = environment_isa(env_in.altitude_m);
+
   EngineInput in;
   in.throttle = app->input.throttle;
   in.load_torque_nm = DEMO_LOAD_NM;
-  in.ambient_pressure_kpa = app->ambient_pressure_kpa;
+  in.ambient_pressure_kpa = atm.pressure_kpa;
 
-  EnvInput env_in;
-  env_in.altitude_m = 0.0;
-  env_in.airspeed_ms = 0.0;
-  env_in.oat_offset_c = app->ambient_c - 15.0;
   model_sync_step(&app->sync, &app->state, &in, &env_in, dt);
 
   /* Refresh the instrument feed + trend rings at a fixed cadence (not per
