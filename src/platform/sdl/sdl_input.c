@@ -3,6 +3,15 @@
 /* Seconds of held key to travel the full closed-to-open range. */
 #define SDL_INPUT_THROTTLE_RATE_PER_S 0.5
 
+/* Flight-condition rate controls and their clamps. */
+#define SDL_INPUT_ALT_RATE_M_PER_S 300.0
+#define SDL_INPUT_ALT_MAX_M 12000.0
+#define SDL_INPUT_SPD_RATE_MS_PER_S 10.0
+#define SDL_INPUT_SPD_MAX_MS 120.0
+#define SDL_INPUT_OAT_RATE_C_PER_S 5.0
+#define SDL_INPUT_OAT_MIN_C -40.0
+#define SDL_INPUT_OAT_MAX_C 50.0
+
 /* Stick deflection (0..1) inside which the axis reads as centred. */
 #define SDL_INPUT_STICK_DEADZONE 0.25
 
@@ -13,6 +22,59 @@
 /* Signed axis sample -> -1.0 .. 1.0. */
 static double axis_frac(Sint16 value) {
   return (double)value / (double)SDL_JOYSTICK_AXIS_MAX;
+}
+
+static void update_env(SdlInputState *input, const bool *keys, double dt) {
+  if (keys[SDL_SCANCODE_R]) {
+    input->altitude_m = 0.0;
+    input->airspeed_ms = 0.0;
+    input->oat_offset_c = 0.0;
+  }
+
+  double alt_dir = 0.0;
+  if (keys[SDL_SCANCODE_PAGEUP]) {
+    alt_dir += 1.0;
+  }
+  if (keys[SDL_SCANCODE_PAGEDOWN]) {
+    alt_dir -= 1.0;
+  }
+  input->altitude_m += alt_dir * SDL_INPUT_ALT_RATE_M_PER_S * dt;
+  if (input->altitude_m < 0.0) {
+    input->altitude_m = 0.0;
+  }
+  if (input->altitude_m > SDL_INPUT_ALT_MAX_M) {
+    input->altitude_m = SDL_INPUT_ALT_MAX_M;
+  }
+
+  double spd_dir = 0.0;
+  if (keys[SDL_SCANCODE_RIGHTBRACKET]) {
+    spd_dir += 1.0;
+  }
+  if (keys[SDL_SCANCODE_LEFTBRACKET]) {
+    spd_dir -= 1.0;
+  }
+  input->airspeed_ms += spd_dir * SDL_INPUT_SPD_RATE_MS_PER_S * dt;
+  if (input->airspeed_ms < 0.0) {
+    input->airspeed_ms = 0.0;
+  }
+  if (input->airspeed_ms > SDL_INPUT_SPD_MAX_MS) {
+    input->airspeed_ms = SDL_INPUT_SPD_MAX_MS;
+  }
+
+  double oat_dir = 0.0;
+  if (keys[SDL_SCANCODE_EQUALS]) {
+    oat_dir += 1.0;
+  }
+  if (keys[SDL_SCANCODE_MINUS]) {
+    oat_dir -= 1.0;
+  }
+  input->oat_offset_c += oat_dir * SDL_INPUT_OAT_RATE_C_PER_S * dt;
+  if (input->oat_offset_c < SDL_INPUT_OAT_MIN_C) {
+    input->oat_offset_c = SDL_INPUT_OAT_MIN_C;
+  }
+  if (input->oat_offset_c > SDL_INPUT_OAT_MAX_C) {
+    input->oat_offset_c = SDL_INPUT_OAT_MAX_C;
+  }
 }
 
 /* Binds `id` unless a gamepad is already held. */
@@ -39,6 +101,9 @@ static void bind_first_available(SdlInputState *input) {
 
 void sdl_input_init(SdlInputState *input) {
   input->throttle = 0.0;
+  input->altitude_m = 0.0;
+  input->airspeed_ms = 0.0;
+  input->oat_offset_c = 0.0;
   input->pad = NULL;
   input->pad_id = 0;
 
@@ -60,23 +125,25 @@ void sdl_input_shutdown(SdlInputState *input) {
 
 void sdl_input_handle_event(SdlInputState *input, const SDL_Event *event) {
   switch (event->type) {
-    case SDL_EVENT_GAMEPAD_ADDED:
-      try_bind(input, event->gdevice.which);
-      break;
-    case SDL_EVENT_GAMEPAD_REMOVED:
-      if (input->pad && event->gdevice.which == input->pad_id) {
-        sdl_input_shutdown(input);
-        bind_first_available(input);
-      }
-      break;
-    default:
-      break;
+  case SDL_EVENT_GAMEPAD_ADDED:
+    try_bind(input, event->gdevice.which);
+    break;
+  case SDL_EVENT_GAMEPAD_REMOVED:
+    if (input->pad && event->gdevice.which == input->pad_id) {
+      sdl_input_shutdown(input);
+      bind_first_available(input);
+    }
+    break;
+  default:
+    break;
   }
 }
 
 void sdl_input_update(SdlInputState *input, double dt) {
   const bool *keys = SDL_GetKeyboardState(NULL);
   SDL_Gamepad *pad = input->pad;
+
+  update_env(input, keys, dt);
 
   bool snap_open = keys[SDL_SCANCODE_HOME];
   bool snap_closed = keys[SDL_SCANCODE_END];
