@@ -125,9 +125,12 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
   ui_hline(r, screen.x, header.y + 12.0f, screen.w, th->frame);
 
   UiRect body;
-  UiRect footer = ui_split_bottom(rest, 10.0f, 6.0f, &body);
+  UiRect footer = ui_split_bottom(rest, 20.0f, 6.0f, &body);
   ui_text(r, footer.x, footer.y, th->text_dim,
-          "UP/DN or W/S  throttle    M  sensor / model    G  gamepad panel    "
+          "UP/DN or W/S  throttle    PGUP/DN  altitude    [ ]  airspeed    "
+          "-/=  OAT");
+  ui_text(r, footer.x, footer.y + UI_GLYPH_H + 2.0f, th->text_dim,
+          "R  reset env    M  sensor / model    G  gamepad panel    "
           "F  fullscreen");
 
   UiRect right;
