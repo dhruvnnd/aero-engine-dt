@@ -9,6 +9,8 @@
  * EngineInput since it changes with altitude during a mission, not a fixed
  * engine parameter. */
 
+#include <stdio.h>
+
 #include "physics/cylinder.h"
 
 #define ENGINE_MAX_CYLINDERS 6
@@ -57,5 +59,11 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
  * reflects faults, is cylinders_total_torque_nm() / ModelState.torque_nm. */
 double engine_model_rpm(const EngineState *state);
 double engine_model_torque_nm(const EngineState *state);
+
+/* Checks *cfg for physically-implausible values
+ * Prints one line per issue found to `out` (pass NULL to check
+ * silently). Returns the number of issues found; 0 means the config is
+ * clean. */
+int engine_config_validate(const EngineConfig *cfg, FILE *out);
 
 #endif /* PHYSICS_ENGINE_MODEL_H */

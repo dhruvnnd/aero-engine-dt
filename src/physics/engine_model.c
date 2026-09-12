@@ -115,3 +115,67 @@ double engine_model_rpm(const EngineState *state) {
 double engine_model_torque_nm(const EngineState *state) {
   return combustion_indicated_torque_nm(state->map_kpa, state->omega_rad_s);
 }
+
+int engine_config_validate(const EngineConfig *cfg, FILE *out) {
+  int issues = 0;
+
+  if (cfg->num_cylinders < 1 || cfg->num_cylinders > ENGINE_MAX_CYLINDERS) {
+    if (out) {
+      fprintf(out, "num_cylinders = %d: must be between 1 and %d\n",
+             cfg->num_cylinders, ENGINE_MAX_CYLINDERS);
+    }
+    issues++;
+  } else {
+    /* firing_order[0 .. num_cylinders) must be a permutation of
+     * 1..num_cylinders; trailing slots must be 0. */
+    int seen[ENGINE_MAX_CYLINDERS + 1] = {0};
+    for (int i = 0; i < cfg->num_cylinders; i++) {
+      int f = cfg->firing_order[i];
+      if (f < 1 || f > cfg->num_cylinders || seen[f]) {
+        if (out) {
+          fprintf(out,
+                 "firing_order[%d] = %d: not a valid entry for a "
+                 "1..%d permutation (out of range or repeated)\n",
+                 i, f, cfg->num_cylinders);
+        }
+        issues++;
+      } else {
+        seen[f] = 1;
+      }
+    }
+    for (int i = cfg->num_cylinders; i < ENGINE_MAX_CYLINDERS; i++) {
+      if (cfg->firing_order[i] != 0) {
+        if (out) {
+          fprintf(out,
+                 "firing_order[%d] = %d: slot beyond num_cylinders (%d) "
+                 "should be 0\n",
+                 i, cfg->firing_order[i], cfg->num_cylinders);
+        }
+        issues++;
+      }
+    }
+  }
+
+  if (cfg->inertia_kg_m2 <= 0.0) {
+    if (out) {
+      fprintf(out, "inertia_kg_m2 = %g: must be positive\n",
+             cfg->inertia_kg_m2);
+    }
+    issues++;
+  }
+  if (cfg->map_tau_s <= 0.0) {
+    if (out) {
+      fprintf(out, "map_tau_s = %g: must be positive\n", cfg->map_tau_s);
+    }
+    issues++;
+  }
+  if (cfg->friction_coeff_nm_per_rad_s <= 0.0) {
+    if (out) {
+      fprintf(out, "friction_coeff_nm_per_rad_s = %g: must be positive\n",
+             cfg->friction_coeff_nm_per_rad_s);
+    }
+    issues++;
+  }
+
+  return issues;
+}
