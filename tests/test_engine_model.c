@@ -101,6 +101,54 @@ static void test_altitude_lowers_map_ceiling_and_rpm(void) {
   CHECK(engine_model_rpm(&alt) < engine_model_rpm(&sea));
 }
 
+/* Phase 0a regression guard: engine_model_step() sub-steps internally now,
+ * so the mean trajectory should be (almost) independent of the caller's
+ * frame dt. Compare a coarse frame dt (0.05s, the actual clamp used in
+ * main.c) against a fine one (0.0005s) over the cold-idle-to-WOT transient
+ * (not just the settled equilibrium, which is an attracting fixed point and
+ * would mask integration error) and require them to stay close throughout.
+ * Re-run this after every later phase -- if it stops passing, sub-stepping
+ * has been broken or ENGINE_SUB_STEP_S needs retuning. */
+static void test_frame_dt_does_not_affect_trajectory(void) {
+  EngineConfig cfg = engine_config_default();
+  EngineInput in = make_input(1.0, 20.0, 101.325);
+
+  EngineState coarse, fine;
+  engine_model_init(&coarse, &cfg);
+  engine_model_init(&fine, &cfg);
+
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    cyl[i] = cylinder_config_default();
+  }
+
+  double checkpoints_s[] = {0.5, 1.0, 2.0, 5.0};
+  double t_coarse = 0.0, t_fine = 0.0;
+  for (size_t c = 0; c < sizeof(checkpoints_s) / sizeof(checkpoints_s[0]);
+       c++) {
+    double target_s = checkpoints_s[c];
+
+    const double dt_coarse = 0.05;
+    while (target_s - t_coarse > 1e-9) {
+      double h = (target_s - t_coarse) < dt_coarse ? (target_s - t_coarse)
+                                                    : dt_coarse;
+      engine_model_step(&coarse, &cfg, &in, cyl, t_coarse, h);
+      t_coarse += h;
+    }
+
+    const double dt_fine = 0.0005;
+    while (target_s - t_fine > 1e-9) {
+      double h =
+          (target_s - t_fine) < dt_fine ? (target_s - t_fine) : dt_fine;
+      engine_model_step(&fine, &cfg, &in, cyl, t_fine, h);
+      t_fine += h;
+    }
+
+    CHECK_NEAR(coarse.omega_rad_s, fine.omega_rad_s, 0.5);
+    CHECK_NEAR(coarse.map_kpa, fine.map_kpa, 0.1);
+  }
+}
+
 static void test_rpm_helper_matches_unit_conversion(void) {
   EngineState st;
   st.omega_rad_s = 261.8;
@@ -120,6 +168,8 @@ static const TestCase CASES[] = {
      test_more_load_gives_lower_steady_rpm},
     {"engine_model.altitude_lowers_map_ceiling_and_rpm",
      test_altitude_lowers_map_ceiling_and_rpm},
+    {"engine_model.frame_dt_does_not_affect_trajectory",
+     test_frame_dt_does_not_affect_trajectory},
     {"engine_model.rpm_helper_matches_unit_conversion",
      test_rpm_helper_matches_unit_conversion},
 };
