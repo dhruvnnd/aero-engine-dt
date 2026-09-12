@@ -24,6 +24,7 @@
 #include "model/channels.h"
 #include "model/state.h"
 #include "model/sync.h"
+#include "physics/engine_spec_io.h"
 #include "physics/environment.h"
 #include "telemetry/sensor.h"
 
@@ -124,7 +125,7 @@ static void usage(FILE *out, const char *argv0) {
           "          [--load NM] [--seed N] [--sensor]\n"
           "          [--alt M] [--airspeed MS] [--oat-offset C]\n"
           "          [--cyl N:KEY=VAL ...] [--fault-at SECONDS]\n"
-          "          [--list] [--help]\n\n"
+          "          [--engine-spec PATH] [--list] [--help]\n\n"
           "Writes a CSV engine/thermal time-series to stdout; progress and\n"
           "run parameters go to stderr. Add --sensor for the noisy sensor\n"
           "channels alongside ground truth.\n\n"
@@ -139,7 +140,9 @@ static void usage(FILE *out, const char *argv0) {
           "  spark spark offset, deg    (0.0 nominal, + = retard)\n"
           "  leak  intake leak fraction (0.0 nominal, + = leaner)\n"
           "  cool  cooling trim         (1.0 nominal, < 1 = hotter head)\n"
-          "--fault-at delays every --cyl trim until that time (default 0).\n\n",
+          "--fault-at delays every --cyl trim until that time (default 0).\n"
+          "--engine-spec PATH loads the engine config from a spec file\n"
+          "  (see twin_config --new) instead of engine_config_default().\n\n",
           argv0);
   print_profiles(out);
 }
@@ -235,6 +238,7 @@ int main(int argc, char **argv) {
   uint32_t seed = 1u;
   int with_sensor = 0;
   double fault_at_s = 0.0;
+  const char *engine_spec_path = NULL;
 
   /* Env overrides: when *_set, the constant replaces the profile's own
    * altitude_m(t) / airspeed_ms(t) / ambient_offset_c for the whole run. */
@@ -263,6 +267,8 @@ int main(int argc, char **argv) {
       }
     } else if (!strcmp(a, "--fault-at") && i + 1 < argc) {
       fault_at_s = atof(argv[++i]);
+    } else if (!strcmp(a, "--engine-spec") && i + 1 < argc) {
+      engine_spec_path = argv[++i];
     } else if (!strcmp(a, "--alt") && i + 1 < argc) {
       alt_override = atof(argv[++i]);
       alt_set = 1;
@@ -306,6 +312,18 @@ int main(int argc, char **argv) {
   ModelSync sync;
   model_sync_init(&sync);
 
+  if (engine_spec_path) {
+    EngineSpecResult r =
+        engine_spec_load(engine_spec_path, &sync.engine_config);
+    if (r.status == ENGINE_SPEC_ERR_PARSE) {
+      fprintf(stderr, "twin_sim: aborting on bad --engine-spec\n");
+      return 2;
+    }
+    /* ERR_OPEN already fell back to engine_config_default() with its own
+     * stderr diagnostic; proceed with that rather than treating it as
+     * fatal. */
+  }
+
   double alt0 = alt_set ? alt_override : profile->altitude_m(0.0);
   double oat_off0 = oat_set ? oat_override : profile->ambient_offset_c;
   AtmosphereState atm0 = environment_isa(alt0);
@@ -319,9 +337,11 @@ int main(int argc, char **argv) {
   sensor_init(&sensor, &scfg, seed);
 
   fprintf(stderr,
-          "# twin_sim profile=%s dt=%.4f duration=%.1f load=%.1f seed=%u%s",
+          "# twin_sim profile=%s dt=%.4f duration=%.1f load=%.1f seed=%u%s "
+          "engine_config=%s",
           profile->name, dt, duration_s, load_nm, seed,
-          with_sensor ? " +sensor" : "");
+          with_sensor ? " +sensor" : "",
+          engine_spec_path ? engine_spec_path : "built-in default");
   if (g_nfaults > 0) {
     fprintf(stderr, " faults=%d@%.0fs", g_nfaults, fault_at_s);
   }
