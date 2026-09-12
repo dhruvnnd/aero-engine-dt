@@ -46,7 +46,7 @@ EngineConfig engine_config_default(void);
 void engine_model_init(EngineState *state, const EngineConfig *config);
 
 /* Advances state by dt seconds under the given input, using RK4.
- * `cylinders` is an array of at least config->num_cylinders entries; crank
+ *  `cylinders`  is an array of at least config->num_cylinders entries; crank
  * torque is their summed contribution. `t` is the current sim time, s. */
 void engine_model_step(EngineState *state, const EngineConfig *config,
                        const EngineInput *input,

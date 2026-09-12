@@ -41,8 +41,8 @@ static void engine_derivative(const double *state, double *dstate, double t,
   double omega = state[ENGINE_STATE_OMEGA];
   double map_kpa = state[ENGINE_STATE_MAP];
 
-  double torque_indicated = cylinders_total_torque_nm(
-      p->cylinders, p->num_cylinders, map_kpa, omega);
+  double torque_indicated =
+      cylinders_total_torque_nm(p->cylinders, p->num_cylinders, map_kpa, omega);
   double torque_friction = p->friction_coeff_nm_per_rad_s * omega;
   double torque_net = torque_indicated - torque_friction - p->load_torque_nm;
 
@@ -76,6 +76,9 @@ void engine_model_init(EngineState *state, const EngineConfig *config) {
   state->map_kpa = 30.0;                    /* idle vacuum */
 }
 
+/* Internal integration sub-step size*/
+#define ENGINE_SUB_STEP_S 0.0003
+
 void engine_model_step(EngineState *state, const EngineConfig *config,
                        const EngineInput *input,
                        const CylinderConfig *cylinders, double t, double dt) {
@@ -91,8 +94,15 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
   params.cylinders = cylinders;
   params.num_cylinders = config->num_cylinders;
 
-  integrator_rk4_step(vec, ENGINE_STATE_COUNT, t, dt, engine_derivative,
-                      &params);
+  double t_local = t;
+  double remaining = dt;
+  while (remaining > 1e-12) {
+    double h = remaining < ENGINE_SUB_STEP_S ? remaining : ENGINE_SUB_STEP_S;
+    integrator_rk4_step(vec, ENGINE_STATE_COUNT, t_local, h, engine_derivative,
+                        &params);
+    t_local += h;
+    remaining -= h;
+  }
 
   state->omega_rad_s = vec[ENGINE_STATE_OMEGA];
   state->map_kpa = vec[ENGINE_STATE_MAP];
