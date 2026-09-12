@@ -3,9 +3,12 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <string.h>
+
 #include "model/state.h"
 #include "model/sync.h"
 #include "physics/engine_model.h"
+#include "physics/engine_spec_io.h"
 #include "physics/environment.h"
 #include "platform/sdl/sdl_input.h"
 #include "platform/sdl/sdl_time.h"
@@ -52,8 +55,13 @@ typedef struct {
 static AppState g_app_state;
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
-  (void)argc;
-  (void)argv;
+  const char *engine_spec_path = NULL;
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "--engine-spec") && i + 1 < argc) {
+      engine_spec_path = argv[++i];
+    }
+  }
+
   *appstate = &g_app_state;
   AppState *app = &g_app_state;
 
@@ -76,6 +84,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   }
 
   model_sync_init(&app->sync);
+
+  if (engine_spec_path) {
+    EngineSpecResult r =
+        engine_spec_load(engine_spec_path, &app->sync.engine_config);
+    if (r.status == ENGINE_SPEC_ERR_PARSE) {
+      SDL_Log("bad --engine-spec (parse error at line %d) -- aborting",
+              r.error_line);
+      return SDL_APP_FAILURE;
+    }
+  }
+  SDL_Log("engine config: %s",
+          engine_spec_path ? engine_spec_path : "built-in default");
 
   AtmosphereState atm = environment_isa(0.0);
   app->ambient_c = atm.temperature_k - 273.15;
