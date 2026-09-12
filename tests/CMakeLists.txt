@@ -17,6 +17,7 @@ set(ENGINE_CORE_TESTS
   test_fuel
   test_lubrication
   test_electrical
+  test_engine_spec_io
 )
 
 foreach(test_name IN LISTS ENGINE_CORE_TESTS)

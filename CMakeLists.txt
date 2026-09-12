@@ -129,6 +129,21 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/twin_sim.c")
 endif()
 
 # ---------------------------------------------------------------------------
+# twin_config: engine-spec authoring/validation CLI. Scaffolds a
+# new engine spec file and validates an existing one before twin_sim/the
+# dashboard loads it. Links engine_core only.
+# ---------------------------------------------------------------------------
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/twin_config.c")
+  add_executable(twin_config "${CMAKE_SOURCE_DIR}/tools/twin_config.c")
+  target_link_libraries(twin_config PRIVATE engine_core)
+  target_compile_options(twin_config PRIVATE
+    -Wall -Wextra
+    $<$<CONFIG:Debug>:-g -O0>
+    $<$<CONFIG:Release>:-O2>
+  )
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests -- only wired up once tests/CMakeLists.txt exists.
 # ---------------------------------------------------------------------------
 if(EXISTS "${CMAKE_SOURCE_DIR}/tests/CMakeLists.txt")
