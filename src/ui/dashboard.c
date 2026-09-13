@@ -96,6 +96,71 @@ void dashboard_init(Dashboard *d) {
   ui_history_init(&d->egt_hist, d->egt_buf, DASHBOARD_TREND_CAP);
   ui_history_init(&d->oilp_hist, d->oilp_buf, DASHBOARD_TREND_CAP);
   ui_history_init(&d->batt_hist, d->batt_buf, DASHBOARD_TREND_CAP);
+
+  d->prev_rpm = UI_STALE;
+  d->prev_cht = UI_STALE;
+  d->prev_egt = UI_STALE;
+  d->prev_oil_temp = UI_STALE;
+  d->prev_oil_press = UI_STALE;
+  d->prev_fuel_press = UI_STALE;
+  d->prev_bus_v = UI_STALE;
+  d->prev_batt_soc = UI_STALE;
+}
+
+static const char *status_word(UiStatus s) {
+  switch (s) {
+  case UI_OK:
+    return "NOMINAL";
+  case UI_WARN:
+    return "CAUTION";
+  case UI_ALERT:
+    return "WARNING";
+  case UI_STALE:
+  default:
+    return "NO DATA";
+  }
+}
+
+static void check_channel(EventLog *log, double sim_time_s, UiStatus *prev,
+                          UiStatus cur, const char *name, const char *category,
+                          double value, const char *unit, int precision) {
+  if (cur == *prev) {
+    return;
+  }
+  EventLevel lvl = (cur == UI_ALERT)  ? EVENT_WARNING
+                   : (cur == UI_WARN) ? EVENT_CAUTION
+                                      : EVENT_INFO;
+  event_log_push(log, sim_time_s, lvl, category, "%s %s -> %s (%.*f %s)", name,
+                 status_word(*prev), status_word(cur), precision, value, unit);
+  *prev = cur;
+}
+
+void dashboard_check_faults(Dashboard *d, EventLog *log, const ModelState *s,
+                            double sim_time_s) {
+  check_channel(log, sim_time_s, &d->prev_rpm,
+                s->rpm > 300.0 ? ui_status_for(s->rpm, RANGE_RPM) : UI_STALE,
+                "revs per minute", "RPM", s->rpm, "rpm", 0);
+  check_channel(log, sim_time_s, &d->prev_cht,
+                ui_status_for(s->thermal.cht_c, RANGE_CHT),
+                "cylinder head temp", "THERM", s->thermal.cht_c, "degC", 0);
+  check_channel(log, sim_time_s, &d->prev_egt,
+                ui_status_for(s->thermal.egt_c, RANGE_EGT), "exhaust gas temp",
+                "THERM", s->thermal.egt_c, "degC", 0);
+  check_channel(log, sim_time_s, &d->prev_oil_temp,
+                ui_status_for(s->thermal.oil_temp_c, RANGE_OIL), "oil temp",
+                "THERM", s->thermal.oil_temp_c, "degC", 0);
+  check_channel(log, sim_time_s, &d->prev_oil_press,
+                ui_status_for(s->lube.oil_press_kpa, RANGE_OIL_PRESS),
+                "oil pressure", "LUBE", s->lube.oil_press_kpa, "kPa", 0);
+  check_channel(log, sim_time_s, &d->prev_fuel_press,
+                ui_status_for(s->fuel.fuel_press_kpa, RANGE_FUEL_PRESS),
+                "fuel pressure", "FUEL", s->fuel.fuel_press_kpa, "kPa", 0);
+  check_channel(log, sim_time_s, &d->prev_bus_v,
+                ui_status_for(s->elec.bus_v, RANGE_BUS_V), "bus voltage",
+                "ELEC", s->elec.bus_v, "V", 1);
+  check_channel(log, sim_time_s, &d->prev_batt_soc,
+                ui_status_for(s->elec.batt_soc, RANGE_BATT_SOC), "battery SoC",
+                "ELEC", s->elec.batt_soc * 100.0, "%", 0);
 }
 
 void dashboard_sample(Dashboard *d, const ModelState *s) {
@@ -131,7 +196,7 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
           "-/=  OAT");
   ui_text(r, footer.x, footer.y + UI_GLYPH_H + 2.0f, th->text_dim,
           "R  reset env    M  sensor / model    G  gamepad panel    "
-          "F  fullscreen");
+          "L  event log    F  fullscreen");
 
   UiRect right;
   UiRect left = ui_split_left_frac(body, 0.42f, 8.0f, &right);

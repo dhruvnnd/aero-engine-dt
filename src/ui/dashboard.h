@@ -4,8 +4,10 @@
 #include <SDL3/SDL.h>
 
 #include "model/state.h"
+#include "telemetry/event_log.h"
 #include "ui/ui_history.h"
 #include "ui/ui_theme.h"
+#include "ui/ui_widgets.h"
 
 #define DASHBOARD_TREND_CAP 300
 
@@ -22,6 +24,9 @@ typedef struct {
   UiHistory egt_hist;
   UiHistory oilp_hist;
   UiHistory batt_hist;
+
+  UiStatus prev_rpm, prev_cht, prev_egt, prev_oil_temp, prev_oil_press,
+      prev_fuel_press, prev_bus_v, prev_batt_soc;
 } Dashboard;
 
 void dashboard_init(Dashboard *d);
@@ -29,6 +34,13 @@ void dashboard_init(Dashboard *d);
 /* Append the current readings to the trend histories. Call at a fixed cadence
  * (e.g. a few Hz), not once per render frame. */
 void dashboard_sample(Dashboard *d, const ModelState *s);
+
+/* Re-classify each monitored channel against the same limits dashboard_draw
+ * uses, and push one EventLog record for each channel whose status changed
+ * since the last call (worsened into caution/warning, or cleared). Call at a
+ * fixed cadence alongside dashboard_sample(), not once per render frame. */
+void dashboard_check_faults(Dashboard *d, EventLog *log, const ModelState *s,
+                            double sim_time_s);
 
 /* Render the whole screen into a `w` x `h` logical area. `sensor_mode` is
  * purely for the header marker -- non-zero when `s` is the noisy instrument
