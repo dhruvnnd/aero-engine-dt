@@ -18,6 +18,7 @@ set(ENGINE_CORE_TESTS
   test_lubrication
   test_electrical
   test_engine_spec_io
+  test_event_log
 )
 
 foreach(test_name IN LISTS ENGINE_CORE_TESTS)
