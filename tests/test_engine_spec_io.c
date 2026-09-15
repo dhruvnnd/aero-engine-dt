@@ -46,6 +46,56 @@ static void test_save_then_load_round_trips(void) {
   remove(TMP_PATH);
 }
 
+/* Phase 1's EngineGeometry fields must round-trip through save/load too --
+ * this is the gap flagged after Phase 1 landed (plan's HOW step 5 called for
+ * extending the schema in the same pass, which didn't happen until now). */
+static void test_geometry_fields_round_trip(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.geom.bore_m = 0.081;
+  cfg.geom.stroke_m = 0.086;
+  cfg.geom.conrod_len_m = 0.145;
+  cfg.geom.compression_ratio = 10.2;
+  cfg.geom.evo_deg = 125.0;
+  cfg.geom.ivc_deg = 585.0;
+  cfg.geom.m_recip_kg = 0.42;
+  cfg.geom.wiebe_a = 4.5;
+  cfg.geom.wiebe_m = 2.3;
+  cfg.geom.delta_theta_burn_deg = 45.0;
+  cfg.geom.spark_base_btdc_deg = 12.0;
+  cfg.geom.spark_rpm_gain_deg_per_1000rpm = 5.5;
+  cfg.geom.spark_map_retard_deg_per_kpa = 0.12;
+  cfg.geom.combustion_efficiency = 0.28;
+
+  CHECK(engine_spec_save(TMP_PATH, &cfg) == 0);
+
+  EngineConfig loaded;
+  EngineSpecResult r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(r.status == ENGINE_SPEC_OK);
+  CHECK(r.unknown_keys == 0);
+
+  CHECK_NEAR(loaded.geom.bore_m, cfg.geom.bore_m, 1e-9);
+  CHECK_NEAR(loaded.geom.stroke_m, cfg.geom.stroke_m, 1e-9);
+  CHECK_NEAR(loaded.geom.conrod_len_m, cfg.geom.conrod_len_m, 1e-9);
+  CHECK_NEAR(loaded.geom.compression_ratio, cfg.geom.compression_ratio, 1e-9);
+  CHECK_NEAR(loaded.geom.evo_deg, cfg.geom.evo_deg, 1e-9);
+  CHECK_NEAR(loaded.geom.ivc_deg, cfg.geom.ivc_deg, 1e-9);
+  CHECK_NEAR(loaded.geom.m_recip_kg, cfg.geom.m_recip_kg, 1e-9);
+  CHECK_NEAR(loaded.geom.wiebe_a, cfg.geom.wiebe_a, 1e-9);
+  CHECK_NEAR(loaded.geom.wiebe_m, cfg.geom.wiebe_m, 1e-9);
+  CHECK_NEAR(loaded.geom.delta_theta_burn_deg, cfg.geom.delta_theta_burn_deg,
+             1e-9);
+  CHECK_NEAR(loaded.geom.spark_base_btdc_deg, cfg.geom.spark_base_btdc_deg,
+             1e-9);
+  CHECK_NEAR(loaded.geom.spark_rpm_gain_deg_per_1000rpm,
+             cfg.geom.spark_rpm_gain_deg_per_1000rpm, 1e-9);
+  CHECK_NEAR(loaded.geom.spark_map_retard_deg_per_kpa,
+             cfg.geom.spark_map_retard_deg_per_kpa, 1e-9);
+  CHECK_NEAR(loaded.geom.combustion_efficiency, cfg.geom.combustion_efficiency,
+             1e-9);
+
+  remove(TMP_PATH);
+}
+
 static void test_missing_keys_fall_back_to_default(void) {
   write_raw("# only overriding one field\ninertia_kg_m2 = 0.95\n");
 
@@ -142,6 +192,8 @@ static void test_validate_flags_non_positive_fields(void) {
 static const TestCase CASES[] = {
     {"engine_spec_io.save_then_load_round_trips",
      test_save_then_load_round_trips},
+    {"engine_spec_io.geometry_fields_round_trip",
+     test_geometry_fields_round_trip},
     {"engine_spec_io.missing_keys_fall_back_to_default",
      test_missing_keys_fall_back_to_default},
     {"engine_spec_io.open_failure_falls_back_to_default",
