@@ -1,18 +1,23 @@
-/* Headless CSV sim-runner for the digital-twin core.
+/* Headless sim-runner for the digital-twin core.
  *
- * Steps model_sync over a scripted throttle/altitude profile and writes a
- * CSV time-series to stdout -- for plotting, eyeballing transient response,
- * and mission-profile experiments, all without the SDL dashboard. Links
- * engine_core only; contains no SDL.
+ * Steps model_sync over a scripted throttle/altitude profile and logs a
+ * time-series to a SQLite database (one shared `runs` + `samples` schema,
+ * auto-created on first use -- see src/data/run_log.h) -- for plotting,
+ * eyeballing transient response, and mission-profile experiments, all
+ * without the SDL dashboard. Links engine_core only; contains no SDL.
  *
  *   twin_sim [--profile NAME] [--dt SECONDS] [--duration SECONDS]
- *            [--load NM] [--seed N] [--sensor] [--list] [--help]
+ *            [--load NM] [--seed N] [--sensor] [--db PATH]
+ *            [--list] [--help]
  *
  * Examples:
  *   twin_sim --list
- *   twin_sim --profile cruise-climb > run.csv
- *   twin_sim --profile rapid-throttle --sensor --dt 0.01 --duration 90 >
- * run.csv
+ *   twin_sim --profile cruise-climb
+ *   twin_sim --profile rapid-throttle --sensor --dt 0.01 --duration 90
+ *   twin_sim --profile hot-day --db runs/bench.db
+ *
+ * Prints the run's id, uuid and db path to stdout on completion so scripts
+ * (plot_run.py's --sim mode included) know which run to read back.
  */
 
 #include <math.h>
@@ -20,8 +25,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
-#include "model/channels.h"
+#include "data/run_log.h"
 #include "model/state.h"
 #include "model/sync.h"
 #include "physics/engine_spec_io.h"
@@ -102,6 +111,31 @@ static const SimProfile PROFILES[] = {
 };
 static const int PROFILE_COUNT = (int)(sizeof(PROFILES) / sizeof(PROFILES[0]));
 
+static void ensure_parent_dir(const char *path) {
+  const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+  const char *bslash = strrchr(path, '\\');
+  if (bslash && (!slash || bslash > slash)) {
+    slash = bslash;
+  }
+#endif
+  if (!slash) {
+    return;
+  }
+  char dir[512];
+  size_t len = (size_t)(slash - path);
+  if (len >= sizeof(dir)) {
+    return;
+  }
+  memcpy(dir, path, len);
+  dir[len] = '\0';
+#ifdef _WIN32
+  _mkdir(dir);
+#else
+  mkdir(dir, 0755);
+#endif
+}
+
 static const SimProfile *find_profile(const char *name) {
   for (int i = 0; i < PROFILE_COUNT; i++) {
     if (strcmp(PROFILES[i].name, name) == 0) {
@@ -122,13 +156,15 @@ static void print_profiles(FILE *out) {
 static void usage(FILE *out, const char *argv0) {
   fprintf(out,
           "usage: %s [--profile NAME] [--dt SECONDS] [--duration SECONDS]\n"
-          "          [--load NM] [--seed N] [--sensor]\n"
+          "          [--load NM] [--seed N] [--sensor] [--db PATH]\n"
           "          [--alt M] [--airspeed MS] [--oat-offset C]\n"
           "          [--cyl N:KEY=VAL ...] [--fault-at SECONDS]\n"
           "          [--engine-spec PATH] [--list] [--help]\n\n"
-          "Writes a CSV engine/thermal time-series to stdout; progress and\n"
-          "run parameters go to stderr. Add --sensor for the noisy sensor\n"
-          "channels alongside ground truth.\n\n"
+          "Logs an engine/thermal time-series to a SQLite database (schema\n"
+          "auto-created on first use); progress and run parameters go to\n"
+          "stderr. Add --sensor for the noisy sensor channels alongside\n"
+          "ground truth. --db PATH sets the database file (default:\n"
+          "runs/twin_sim.db; its parent directory is created if missing).\n\n"
           "--alt, --airspeed and --oat-offset pin that flight-condition\n"
           "  channel to a constant for the whole run, overriding the\n"
           "  profile's own schedule (throttle still follows the profile).\n"
@@ -244,6 +280,7 @@ int main(int argc, char **argv) {
   int with_sensor = 0;
   double fault_at_s = 0.0;
   const char *engine_spec_path = NULL;
+  const char *db_path = "runs/twin_sim.db";
 
   /* Env overrides: when *_set, the constant replaces the profile's own
    * altitude_m(t) / airspeed_ms(t) / ambient_offset_c for the whole run. */
@@ -274,6 +311,8 @@ int main(int argc, char **argv) {
       fault_at_s = atof(argv[++i]);
     } else if (!strcmp(a, "--engine-spec") && i + 1 < argc) {
       engine_spec_path = argv[++i];
+    } else if (!strcmp(a, "--db") && i + 1 < argc) {
+      db_path = argv[++i];
     } else if (!strcmp(a, "--alt") && i + 1 < argc) {
       alt_override = atof(argv[++i]);
       alt_set = 1;
@@ -361,20 +400,35 @@ int main(int argc, char **argv) {
   }
   fprintf(stderr, "\n");
 
+  ensure_parent_dir(db_path);
+  RunLog log;
+  if (run_log_open(&log, db_path) != RUN_LOG_OK) {
+    fprintf(stderr, "twin_sim: aborting on bad --db %s\n", db_path);
+    return 2;
+  }
+
+  RunLogMeta meta = {0};
+  meta.source = "twin_sim";
+  meta.profile = profile->name;
+  meta.dt = dt;
+  meta.duration_s = duration_s;
+  meta.load_nm = load_nm;
+  meta.seed = seed;
+  meta.engine_spec = engine_spec_path;
+  meta.with_sensor = with_sensor;
+
+  char uuid[37];
+  int64_t run_id = run_log_begin_run(&log, &meta, uuid);
+  if (run_id < 0) {
+    fprintf(stderr, "twin_sim: aborting -- couldn't start a run in %s\n",
+            db_path);
+    run_log_close(&log);
+    return 2;
+  }
+  fprintf(stdout, "run_id=%lld uuid=%s db=%s\n", (long long)run_id, uuid,
+          db_path);
+
   int faults_applied = (g_nfaults == 0);
-
-  int nchan = 0;
-  const ModelChannel *chans = model_channels(&nchan);
-
-  printf("t,throttle,alt_m,ambient_c,airspeed_ms,cool_index");
-  for (int c = 0; c < nchan; c++) {
-    printf(",%s", chans[c].name);
-  }
-  if (with_sensor) {
-    printf(",s_rpm,s_rpm_ok,s_map_kpa,s_map_ok,s_cht_c,s_cht_ok,"
-           "s_egt_c,s_egt_ok,s_oil_c,s_oil_ok");
-  }
-  printf("\n");
 
   long nsteps = (long)(duration_s / dt + 0.5);
   for (long i = 0; i <= nsteps; i++) {
@@ -397,19 +451,20 @@ int main(int argc, char **argv) {
     double cool_index =
         environment_cool_index(env_now.density_kg_m3, airspeed_ms, st.rpm);
 
-    printf("%.3f,%.4f,%.1f,%.2f,%.2f,%.4f", t, throttle, alt_m, ambient_c,
-           airspeed_ms, cool_index);
-    for (int c = 0; c < nchan; c++) {
-      printf(",%.*f", chans[c].precision, chans[c].get(&st, chans[c].index));
-    }
-
+    SensorReading r;
+    RunLogSample sample = {0};
+    sample.t = t;
+    sample.throttle = throttle;
+    sample.alt_m = alt_m;
+    sample.ambient_c = ambient_c;
+    sample.airspeed_ms = airspeed_ms;
+    sample.cool_index = cool_index;
+    sample.state = &st;
     if (with_sensor) {
-      SensorReading r = sensor_read(&sensor, &st);
-      printf(",%.2f,%d,%.3f,%d,%.3f,%d,%.3f,%d,%.3f,%d", r.value.rpm, r.ok.rpm,
-             r.value.map_kpa, r.ok.map_kpa, r.value.cht_c, r.ok.cht_c,
-             r.value.egt_c, r.ok.egt_c, r.value.oil_temp_c, r.ok.oil_temp_c);
+      r = sensor_read(&sensor, &st);
+      sample.sensor = &r;
     }
-    printf("\n");
+    run_log_write_sample(&log, run_id, &sample);
 
     if (i < nsteps) {
       EngineInput in;
@@ -425,5 +480,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  run_log_end_run(&log, run_id, "completed");
+  run_log_close(&log);
   return 0;
 }
