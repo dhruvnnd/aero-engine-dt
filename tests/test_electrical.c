@@ -35,8 +35,8 @@ static void test_alt_output_rises_with_rpm(void) {
   ElecState below, above;
   elec_state_init(&below);
   elec_state_init(&above);
-  elec_step(&below, &c, 700.0, 0.01);  /* under cut-in */
-  elec_step(&above, &c, 2000.0, 0.01); /* over full output */
+  elec_step(&below, &c, 700.0, 0, 0.01);  /* under cut-in */
+  elec_step(&above, &c, 2000.0, 0, 0.01); /* over full output */
   CHECK(below.alt_current_a < above.alt_current_a);
   CHECK(above.alt_current_a >= c.load_base_a); /* at least carrying the load */
 }
@@ -46,7 +46,7 @@ static void test_bus_regulated_at_cruise(void) {
   ElecState s;
   elec_state_init(&s);
   for (int i = 0; i < 200; i++) {
-    elec_step(&s, &c, 2200.0, 0.01);
+    elec_step(&s, &c, 2200.0, 0, 0.01);
   }
   CHECK_NEAR(s.bus_v, c.bus_nominal_v, 1e-6);
   CHECK(s.batt_soc >= 1.0 - 1e-9); /* full battery, alternator has surplus */
@@ -61,8 +61,8 @@ static void test_alternator_failure_drains_battery(void) {
   elec_state_init(&hs);
   elec_state_init(&ds);
   for (int i = 0; i < 60000; i++) { /* 10 min at cruise rpm */
-    elec_step(&hs, &healthy, 2200.0, 0.01);
-    elec_step(&ds, &dead, 2200.0, 0.01);
+    elec_step(&hs, &healthy, 2200.0, 0, 0.01);
+    elec_step(&ds, &dead, 2200.0, 0, 0.01);
   }
   CHECK_NEAR(hs.bus_v, healthy.bus_nominal_v, 1e-6); /* healthy: regulated */
   CHECK(ds.bus_v < 13.0);                            /* dead: on the battery */
@@ -76,7 +76,7 @@ static void test_soc_clamps_and_recharges(void) {
   dead.alt_health = 0.0;
   ElecState drained;
   elec_state_init(&drained);
-  elec_step(&drained, &dead, 2000.0, 1.0e9); /* absurd dt: would overshoot */
+  elec_step(&drained, &dead, 2000.0, 0, 1.0e9); /* absurd dt: would overshoot */
   CHECK_NEAR(drained.batt_soc, 0.0, 1e-9);
 
   ElecConfig healthy = elec_config_default();
@@ -84,7 +84,7 @@ static void test_soc_clamps_and_recharges(void) {
   elec_state_init(&charging);
   charging.batt_soc = 0.40;
   for (int i = 0; i < 120000; i++) { /* 20 min cruise */
-    elec_step(&charging, &healthy, 2200.0, 0.01);
+    elec_step(&charging, &healthy, 2200.0, 0, 0.01);
   }
   CHECK(charging.batt_soc > 0.40);
   CHECK(charging.batt_soc <= 1.0);
