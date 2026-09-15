@@ -11,6 +11,7 @@ ElecConfig elec_config_default(void) {
   c.batt_capacity_ah = 15.0;
   c.batt_open_v = 12.6;
   c.batt_internal_r_ohm = 0.03;
+  c.starter_current_a = 150.0;
   return c;
 }
 
@@ -29,17 +30,21 @@ static double alt_capacity_a(const ElecConfig *c, double rpm) {
   } else if (rpm >= c->alt_full_output_rpm) {
     frac = 1.0;
   } else {
-    frac = (rpm - c->alt_cutin_rpm) /
-           (c->alt_full_output_rpm - c->alt_cutin_rpm);
+    frac =
+        (rpm - c->alt_cutin_rpm) / (c->alt_full_output_rpm - c->alt_cutin_rpm);
   }
-  double h = c->alt_health < 0.0 ? 0.0 : (c->alt_health > 1.0 ? 1.0 : c->alt_health);
+  double h =
+      c->alt_health < 0.0 ? 0.0 : (c->alt_health > 1.0 ? 1.0 : c->alt_health);
   return c->alt_rated_a * frac * h;
 }
 
 void elec_step(ElecState *state, const ElecConfig *config, double rpm,
-               double dt) {
+               int starter_active, double dt) {
   double alt_cap_a = alt_capacity_a(config, rpm);
   double load_a = config->load_base_a;
+  if (starter_active) {
+    load_a += config->starter_current_a;
+  }
 
   double batt_i_a; /* + discharging, - charging */
   double alt_out_a;

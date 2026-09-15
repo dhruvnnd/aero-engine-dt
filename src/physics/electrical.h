@@ -12,6 +12,8 @@ typedef struct {
   double batt_capacity_ah;    /* battery capacity */
   double batt_open_v;         /* open-circuit terminal voltage at full charge */
   double batt_internal_r_ohm; /* internal resistance -> sag under discharge */
+  double starter_current_a;   /* extra current draw while the starter motor
+                               * is cranking the engine */
 } ElecConfig;
 
 typedef struct {
@@ -29,6 +31,6 @@ void elec_state_init(ElecState *state);
 
 /* Refreshes the electrical state from the current crank speed. */
 void elec_step(ElecState *state, const ElecConfig *config, double rpm,
-               double dt);
+               int starter_active, double dt);
 
 #endif /* PHYSICS_ELECTRICAL_H */
