@@ -195,8 +195,9 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
           "UP/DN or W/S  throttle    PGUP/DN  altitude    [ ]  airspeed    "
           "-/=  OAT");
   ui_text(r, footer.x, footer.y + UI_GLYPH_H + 2.0f, th->text_dim,
-          "R  reset env    M  sensor / model    G  gamepad panel    "
-          "L  event log    F  fullscreen");
+          "R  reset env    I  start engine    O  stop engine    "
+          "M  sensor / model    G  gamepad panel    L  event log    "
+          "F  fullscreen");
 
   UiRect right;
   UiRect left = ui_split_left_frac(body, 0.42f, 8.0f, &right);

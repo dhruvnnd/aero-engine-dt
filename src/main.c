@@ -34,16 +34,23 @@
  * render frame rate. */
 #define SAMPLE_PERIOD_S 0.1
 
-/* External shaft load for the demo (prop + accessories), N*m */
-#define DEMO_LOAD_NM 40.0
+/* External shaft load for the demo (prop + accessories), N*m -- a flat
+ * placeholder until Phase 4's real propeller model exists (load should
+ * scale with RPM/flight condition, not stay constant). 40.0 was calibrated
+ * against the old mean-value torque curve; Phase 1's real geometry produces
+ * only ~22 N*m at idle MAP (~30 kPa), so a fixed 40 N*m load stalled the
+ * engine immediately at closed throttle every time. 8.0 leaves a comfortable
+ * idle margin; it also means WOT revs higher than before, since the same
+ * light load applies everywhere -- expected until Phase 4 fixes the whole
+ * range at once. */
+#define DEMO_LOAD_NM 8.0
 
 typedef struct {
   SdlWindowContext window_ctx;
   SdlWindowContext
       gamepad_ctx; /* companion panel; window == NULL if it failed */
   bool gamepad_win_shown;
-  SdlWindowContext
-      log_ctx; /* companion panel; window == NULL if it failed */
+  SdlWindowContext log_ctx; /* companion panel; window == NULL if it failed */
   bool log_win_shown;
   SdlFrameTimer timer;
 
@@ -60,6 +67,8 @@ typedef struct {
   double ambient_c;
   double ambient_pressure_kpa;
   double sample_accum_s;
+
+  bool engine_stop_requested;
 } AppState;
 
 static AppState g_app_state;
@@ -106,8 +115,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   }
 
   event_log_init(&app->events);
-  event_log_push(&app->events, 0.0, EVENT_INFO, "SYSTEM",
-                "dashboard started");
+  event_log_push(&app->events, 0.0, EVENT_INFO, "SYSTEM", "dashboard started");
 
   model_sync_init(&app->sync);
 
@@ -118,21 +126,28 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
       SDL_Log("bad --engine-spec (parse error at line %d) -- aborting",
               r.error_line);
       event_log_push(&app->events, 0.0, EVENT_WARNING, "CONFIG",
-                    "--engine-spec parse error at line %d -- aborting",
-                    r.error_line);
+                     "--engine-spec parse error at line %d -- aborting",
+                     r.error_line);
       return SDL_APP_FAILURE;
     }
   }
   SDL_Log("engine config: %s",
           engine_spec_path ? engine_spec_path : "built-in default");
   event_log_push(&app->events, 0.0, EVENT_INFO, "CONFIG", "engine config: %s",
-                engine_spec_path ? engine_spec_path : "built-in default");
+                 engine_spec_path ? engine_spec_path : "built-in default");
 
   AtmosphereState atm = environment_isa(0.0);
   app->ambient_c = atm.temperature_k - 273.15;
   app->ambient_pressure_kpa = atm.pressure_kpa;
 
   model_state_init(&app->state, &app->sync.engine_config, app->ambient_c);
+
+  app->state.engine.run_state = ENGINE_STOPPED;
+  app->state.engine.omega_rad_s = 0.0;
+  app->state.engine.map_kpa = app->ambient_pressure_kpa; /* not being pumped,
+                                                          * so no vacuum */
+  event_log_push(&app->events, 0.0, EVENT_INFO, "ENGINE",
+                 "engine off -- press I to start");
 
   SensorConfig scfg = sensor_config_default();
   sensor_init(&app->sensor, &scfg, 0xC0FFEEu);
@@ -177,8 +192,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
        event->gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)) {
     app->sensor_mode = !app->sensor_mode;
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "MODE",
-                  "display feed -> %s",
-                  app->sensor_mode ? "sensor" : "model");
+                   "display feed -> %s", app->sensor_mode ? "sensor" : "model");
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -191,8 +205,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
       SDL_HideWindow(app->gamepad_ctx.window);
     }
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "PANEL",
-                  "gamepad panel %s",
-                  app->gamepad_win_shown ? "shown" : "hidden");
+                   "gamepad panel %s",
+                   app->gamepad_win_shown ? "shown" : "hidden");
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -206,24 +220,56 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     }
   }
 
+  if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+      event->key.key == SDLK_I) {
+    const double min_start_soc = 0.05;
+    if (app->state.engine.run_state == ENGINE_STOPPED &&
+        app->state.elec.batt_soc < min_start_soc) {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION,
+                     "ENGINE", "battery too weak to start (SOC %.0f%%)",
+                     app->state.elec.batt_soc * 100.0);
+    } else {
+      EngineRunState before = app->state.engine.run_state;
+      engine_model_start(&app->state.engine, &app->sync.engine_config,
+                         app->state.cyl);
+      if (before == ENGINE_STOPPED) {
+        event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                       "cranking...");
+      }
+    }
+  }
+
+  if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+      event->key.key == SDLK_O) {
+    if (app->state.engine.run_state == ENGINE_RUNNING) {
+      app->engine_stop_requested = true;
+      engine_model_stop(&app->state.engine);
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                     "ignition off");
+    } else if (app->state.engine.run_state == ENGINE_CRANKING) {
+      engine_model_stop(&app->state.engine);
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                     "cranking aborted");
+    }
+  }
+
   /* Handle fullscreen */
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
       event->key.key == SDLK_F && app->window_ctx.window) {
     app->fullscreen = !app->fullscreen;
     SDL_SetWindowFullscreen(app->window_ctx.window, app->fullscreen);
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "DISPLAY",
-                  "fullscreen %s", app->fullscreen ? "on" : "off");
+                   "fullscreen %s", app->fullscreen ? "on" : "off");
   }
 
   if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "INPUT",
-                  "gamepad connected (id %u)",
-                  (unsigned)event->gdevice.which);
+                   "gamepad connected (id %u)", (unsigned)event->gdevice.which);
   }
   if (event->type == SDL_EVENT_GAMEPAD_REMOVED) {
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION, "INPUT",
-                  "gamepad disconnected (id %u)",
-                  (unsigned)event->gdevice.which);
+                   "gamepad disconnected (id %u)",
+                   (unsigned)event->gdevice.which);
   }
 
   sdl_input_handle_event(&app->input, event);
@@ -255,7 +301,23 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   in.load_torque_nm = DEMO_LOAD_NM;
   in.ambient_pressure_kpa = atm.pressure_kpa;
 
+  EngineRunState prev_run_state = app->state.engine.run_state;
   model_sync_step(&app->sync, &app->state, &in, &env_in, dt);
+  EngineRunState cur_run_state = app->state.engine.run_state;
+  if (prev_run_state != ENGINE_STOPPED && cur_run_state == ENGINE_STOPPED) {
+    if (app->engine_stop_requested) {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                     "engine off -- press I to start");
+      app->engine_stop_requested = false;
+    } else {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING,
+                     "ENGINE", "engine stalled -- press I to start");
+    }
+  } else if (prev_run_state == ENGINE_CRANKING &&
+             cur_run_state == ENGINE_RUNNING) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                   "engine caught, running");
+  }
 
   /* Refresh the instrument feed + trend rings at a fixed cadence (not per
    * render frame), so the gauges read a lively ~10 Hz sensor sample rather
@@ -263,11 +325,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   app->sample_accum_s += dt;
   while (app->sample_accum_s >= SAMPLE_PERIOD_S) {
     sensor_read_state(&app->sensor, &app->state, &app->display);
-    const ModelState *sampled =
-        app->sensor_mode ? &app->display : &app->state;
+    const ModelState *sampled = app->sensor_mode ? &app->display : &app->state;
     dashboard_sample(&app->dash, sampled);
     dashboard_check_faults(&app->dash, &app->events, sampled,
-                          app->sync.sim_time_s);
+                           app->sync.sim_time_s);
     app->sample_accum_s -= SAMPLE_PERIOD_S;
   }
 
@@ -294,8 +355,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     SDL_Renderer *lr = app->log_ctx.renderer;
     SDL_SetRenderDrawColor(lr, 10, 14, 12, SDL_ALPHA_OPAQUE);
     SDL_RenderClear(lr);
-    event_log_panel_draw(lr, (float)LOG_WIN_W, (float)LOG_WIN_H,
-                        &app->events);
+    event_log_panel_draw(lr, (float)LOG_WIN_W, (float)LOG_WIN_H, &app->events);
     SDL_RenderPresent(lr);
   }
 
