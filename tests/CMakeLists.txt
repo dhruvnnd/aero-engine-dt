@@ -20,6 +20,7 @@ set(ENGINE_CORE_TESTS
   test_engine_spec_io
   test_event_log
   test_crank_thermo
+  test_run_log
 )
 
 foreach(test_name IN LISTS ENGINE_CORE_TESTS)
