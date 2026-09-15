@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
-"""Plot a twin_sim CSV run.
+"""Plot a twin_sim run from its SQLite database.
 
-Reads the CSV that tools/twin_sim writes (engine + thermal time-series,
-plus the optional noisy sensor channels) and draws it as a stacked
-multi-panel figure with a plain metadata header. Columns are matched by
-header name, so extra columns added later are ignored rather than shifting
-the layout. --y overrides the layout with an explicit column list.
+Reads one run (engine + thermal time-series, plus the optional noisy sensor
+channels) out of the `runs`/`samples` schema that tools/twin_sim logs to
+(src/data/run_log.h) and draws it as a stacked multi-panel figure with a
+plain metadata header. Columns are matched by name, so extra columns added
+later are ignored rather than shifting the layout. --y overrides the layout
+with an explicit column list.
 
 Examples:
-    python tools/plot_run.py runs/rt.csv
-    python tools/plot_run.py -                       # read CSV from stdin
-    python tools/plot_run.py runs/rt.csv --y cht_c egt_c
+    python tools/plot_run.py runs/twin_sim.db
+    python tools/plot_run.py runs/twin_sim.db --run 3
+    python tools/plot_run.py runs/twin_sim.db --y cht_c egt_c
     python tools/plot_run.py --out runs/rt.png --sim -p rapid-throttle --sensor
 
 `--sim` consumes every argument after it and forwards them to twin_sim, so
-put any plot_run options before it.
+put any plot_run options before it. It reads back whichever run twin_sim
+just logged (twin_sim reports its run_id/db on stdout on completion).
 
 Needs matplotlib:  pip install -r tools/requirements.txt
 """
 from __future__ import annotations
 
 import argparse
-import csv
+import sqlite3
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -81,67 +82,70 @@ def run_twin_sim(exe, args):
     return proc.stdout, proc.stderr
 
 
-def decode_csv_bytes(data):
-    """Decode CSV bytes to text, honouring a UTF-8 or UTF-16 BOM and also
-    sniffing BOM-less UTF-16 -- what PowerShell's `>` redirection writes."""
-    if data.startswith(b"\xef\xbb\xbf"):
-        return data.decode("utf-8-sig")
-    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
-        return data.decode("utf-16")  # strips the BOM, picks endianness
-    head = data[:256]
-    if head and head.count(0) > len(head) // 3:  # lots of NULs -> UTF-16, no BOM
-        return data.decode("utf-16-le" if head[1:2] == b"\x00" else "utf-16-be")
-    return data.decode("utf-8", errors="replace")
+def load_run(db_path, run_id=None):
+    """Reads one run out of a twin_sim SQLite database into
+    (fieldnames, {column: [float,...]}, meta). meta is the run's `runs` row
+    as a dict. run_id=None picks the most recently started run in the db.
+    Sensor columns (s_*) are only included when that run actually captured
+    them (meta['with_sensor']) -- otherwise they'd be present but all NULL,
+    which would just draw empty overlay lines."""
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    try:
+        if run_id is None:
+            row = con.execute(
+                "SELECT * FROM runs ORDER BY id DESC LIMIT 1;").fetchone()
+            if row is None:
+                sys.exit(f"plot_run: {db_path} has no runs logged yet.")
+        else:
+            row = con.execute(
+                "SELECT * FROM runs WHERE id=?;", (run_id,)).fetchone()
+            if row is None:
+                sys.exit(f"plot_run: no run id {run_id} in {db_path}.")
+        meta = dict(row)
+
+        cur = con.execute(
+            "SELECT * FROM samples WHERE run_id=? ORDER BY id;", (meta["id"],))
+        names = [d[0] for d in cur.description if d[0] not in ("id", "run_id")]
+        if not meta["with_sensor"]:
+            names = [n for n in names if not n.startswith("s_")]
+        cols = {name: [] for name in names}
+        for r in cur:
+            for name in names:
+                v = r[name]
+                cols[name].append(float("nan") if v is None else float(v))
+        return names, cols, meta
+    finally:
+        con.close()
 
 
-def load_csv(text):
-    """Parse twin_sim CSV text into (fieldnames, {column: [float,...]}, banner).
-    Tolerates a merged-in '#' banner. Encoding is handled by
-    decode_csv_bytes() at the call sites."""
-    raw = text.splitlines()
-    banner = "\n".join(ln for ln in raw if ln.lstrip().startswith("#"))
-    lines = [ln for ln in raw if ln.strip() and not ln.lstrip().startswith("#")]
-    reader = csv.DictReader(lines)
-    if not reader.fieldnames:
-        sys.exit("plot_run: no CSV header found in input.")
-    cols = {name: [] for name in reader.fieldnames}
-    for row in reader:
-        for name in reader.fieldnames:
-            try:
-                cols[name].append(float(row.get(name, "")))
-            except (TypeError, ValueError):
-                cols[name].append(float("nan"))
-    return list(reader.fieldnames), cols, banner
-
-
-def parse_banner(text):
-    out = {}
+def parse_run_report(text):
+    """Extracts {run_id, uuid, db} from twin_sim's stdout completion line
+    ('run_id=N uuid=... db=PATH'). Returns None if not found (e.g. twin_sim
+    exited before logging a run)."""
     for line in text.splitlines():
-        if "profile=" not in line:
-            continue
-        for tok in line.lstrip("#").split():
-            if "=" in tok:
-                k, v = tok.split("=", 1)
-                out[k] = v
-    return out
+        if line.startswith("run_id="):
+            return dict(tok.split("=", 1) for tok in line.split() if "=" in tok)
+    return None
 
 
-def header_text(cols, banner, source_label, title):
+def header_text(cols, meta, source_label, title):
     if title:
         return title
-    b = parse_banner(banner)
     t = cols.get("t", [])
     n = len(t)
-    dt = float(b["dt"]) if "dt" in b else (t[1] - t[0] if n > 1 else float("nan"))
-    dur = float(b["duration"]) if "duration" in b else (t[-1] if t else 0.0)
+    dt = meta.get("dt") or (t[1] - t[0] if n > 1 else float("nan"))
+    dur = meta.get("duration_s") or (t[-1] if t else 0.0)
     rate = (1.0 / dt) if dt and dt == dt else float("nan")
-    sensor = ("+sensor" in banner) or any(k.startswith("s_") for k in cols)
+    sensor = bool(meta.get("with_sensor"))
     src = source_label if len(source_label) <= 70 else "..." + source_label[-67:]
-    gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-    line1 = (f"{b.get('profile', '--')}   dt={dt:.3f}s   dur={dur:.1f}s   "
-             f"load={b.get('load', '--')} N·m   seed={b.get('seed', '--')}   "
+    load = meta.get("load_nm")
+    load_s = f"{load:.1f}" if load is not None else "--"
+    line1 = (f"{meta.get('profile') or '--'}   dt={dt:.3f}s   dur={dur:.1f}s   "
+             f"load={load_s} N·m   seed={meta.get('seed', '--')}   "
              f"sensor={'on' if sensor else 'off'}")
-    line2 = f"{src}   ·   {n} samples @ {rate:.0f} Hz   ·   {gen}"
+    line2 = (f"{src}   ·   {n} samples @ {rate:.0f} Hz   ·   "
+             f"run {meta.get('id', '?')}   ·   {meta.get('started_at', '--')}")
     return line1 + "\n" + line2
 
 
@@ -303,12 +307,15 @@ def render(plt, cols, header, args):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Plot a twin_sim CSV run.",
+        description="Plot a twin_sim run from its SQLite database.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="`--sim` forwards all following args to twin_sim; "
                "put plot_run options before it.")
-    ap.add_argument("csv", nargs="?",
-                    help="CSV file, or '-' for stdin. Omit when using --sim.")
+    ap.add_argument("db", nargs="?",
+                    help="twin_sim SQLite database, e.g. runs/twin_sim.db. "
+                         "Omit when using --sim.")
+    ap.add_argument("--run", type=int, metavar="ID",
+                    help="Run id to plot (default: the most recent run in the db).")
     ap.add_argument("--sim", nargs=argparse.REMAINDER, metavar="ARG",
                     help="Run twin_sim with the remaining args and plot its output.")
     ap.add_argument("--twin-sim", metavar="PATH", help="Path to the twin_sim binary.")
@@ -326,26 +333,24 @@ def main():
     args = ap.parse_args()
 
     if args.sim is not None:
-        text, banner = run_twin_sim(find_twin_sim(args.twin_sim), args.sim)
-        _fields, cols, embedded = load_csv(text)
-        banner += embedded
+        stdout, _stderr = run_twin_sim(find_twin_sim(args.twin_sim), args.sim)
+        info = parse_run_report(stdout)
+        if not info:
+            sys.exit("plot_run: twin_sim didn't report a run_id/db -- did it fail?")
+        _fields, cols, meta = load_run(info["db"], int(info["run_id"]))
         source_label = "twin_sim " + " ".join(args.sim)
         if "--sensor" in args.sim:
             args.sensor = True
-    elif args.csv == "-" or (args.csv is None and not sys.stdin.isatty()):
-        _fields, cols, banner = load_csv(decode_csv_bytes(sys.stdin.buffer.read()))
-        source_label = "stdin"
-    elif args.csv:
-        _fields, cols, banner = load_csv(
-            decode_csv_bytes(Path(args.csv).read_bytes()))
-        source_label = args.csv
+    elif args.db:
+        _fields, cols, meta = load_run(args.db, args.run)
+        source_label = args.db
     else:
-        ap.error("give a CSV path, '-' for stdin, or --sim ...")
+        ap.error("give a database path, or --sim ...")
 
     if "t" not in cols or not cols["t"]:
-        sys.exit("plot_run: CSV has no usable 't' column -- is this a twin_sim run?")
+        sys.exit(f"plot_run: run {meta.get('id', '?')} has no samples logged.")
 
-    header = header_text(cols, banner, source_label, args.title)
+    header = header_text(cols, meta, source_label, args.title)
 
     try:
         import matplotlib

@@ -1,18 +1,22 @@
 Developer helpers. Nothing here is built into the twin, linked against it,
 or needed to compile, test, or run the project.
 
-  twin_sim      headless CSV sim-runner. C source, built by the top-level
-                CMake build into build/twin_sim(.exe).
-  plot_run.py   plots a twin_sim CSV. Python 3, needs matplotlib
-                (pip install -r tools/requirements.txt).
+  twin_sim      headless sim-runner. C source, built by the top-level
+                CMake build into build/twin_sim(.exe). Logs each run to a
+                SQLite database.
+  plot_run.py   plots a run out of that database. Python 3, needs
+                matplotlib (pip install -r tools/requirements.txt).
 
 
 twin_sim
 
 Steps the digital-twin core (engine + thermal + sync, plus the sensor
-model) forward over a scripted throttle/altitude mission and writes a CSV
-time-series to stdout. Run parameters and errors go to stderr, so a plain
-redirect keeps the CSV clean. Links engine_core only; no SDL.
+model) forward over a scripted throttle/altitude mission and logs a
+time-series to a SQLite database -- one shared `runs` + `samples` schema
+(src/data/run_log.h), auto-created on first use. Run parameters and errors
+go to stderr; on completion it prints `run_id=N uuid=... db=PATH` to
+stdout so a script knows which run to read back. Links engine_core only;
+no SDL.
 
 Build:
 
@@ -21,16 +25,18 @@ Build:
 Usage:
 
   twin_sim [--profile NAME] [--dt SECONDS] [--duration SECONDS]
-           [--load NM] [--seed N] [--sensor]
+           [--load NM] [--seed N] [--sensor] [--db PATH]
            [--cyl N:KEY=VAL ...] [--fault-at SECONDS]
            [--list] [--help]
 
   --profile NAME   mission profile (default: idle). -p also works.
-  --dt SECONDS     integration step and CSV row spacing (default: 0.02)
+  --dt SECONDS     integration step and sample spacing (default: 0.02)
   --duration SEC   total simulated time (default: the profile's own)
-  --load NM        constant external load torque, N*m (default: 40)
+  --load NM        constant external load torque, N*m (default: 8)
   --seed N         RNG seed for the --sensor noise stream (default: 1)
-  --sensor         add 10 noisy sensor columns next to ground truth
+  --sensor         add the 10 noisy sensor columns next to ground truth
+  --db PATH        SQLite database to log into (default: runs/twin_sim.db;
+                      its parent directory is created if missing)
   --cyl N:KEY=VAL  set one trim on cylinder N (1-based); repeatable. KEY:
                      inj    injector flow trim   (1.0 nominal)
                      comp   compression trim     (1.0 nominal)
@@ -49,54 +55,56 @@ Profiles:
   hot-day          0.80 throttle, sea level, ISA +25 C
   rapid-throttle   0.20 <-> 1.00 square wave, 20 s period, sea level
 
-Columns:
+Database schema:
 
-  t          simulated time, s
-  throttle   commanded lever position, 0..1
-  alt_m      geopotential altitude, m
-  ambient_c  ISA outside-air temp at alt_m plus the profile offset, deg C
-  rpm        crank speed
-  map_kpa    manifold absolute pressure, kPa
-  torque_nm  indicated torque, N*m
-  cht_c      cylinder head temperature, deg C (engine-wide, lumped)
-  egt_c      exhaust gas temperature, deg C (engine-wide, lumped)
-  oil_c      oil temperature, deg C
-  cht_c_1..4 per-cylinder head temperature, deg C
-  egt_c_1..4 per-cylinder exhaust gas temperature, deg C
+One shared file (many runs, not one file per run) with two tables:
 
-At nominal trims the per-cylinder columns equal the lumped cht_c / egt_c.
-Use --cyl to make a cylinder diverge; plot_run then shows "cyl CHT" /
-"cyl EGT" panels automatically.
+  runs      one row per run: id, uuid, source ("twin_sim"/"dashboard"),
+            profile, dt, duration_s, load_nm, seed, engine_spec,
+            with_sensor, started_at, ended_at, status, synced_at
+  samples   one row per timestep: run_id, t, throttle, alt_m, ambient_c,
+            airspeed_ms, cool_index, one REAL column per entry in
+            model_channels() (src/model/channels.c) -- currently rpm,
+            map_kpa, torque_nm, cht_c, egt_c, oil_c, cht_c_1..4, egt_c_1..4,
+            air_gps, fuel_kgph, fuel_press_kpa, lambda_1..4, oil_press_kpa,
+            bus_v, alt_a, alt_field_a, batt_soc -- plus s_rpm/s_rpm_ok/
+            s_map_kpa/s_map_ok/s_cht_c/s_cht_ok/s_egt_c/s_egt_ok/s_oil_c/
+            s_oil_ok, populated only when that run used --sensor (NULL
+            otherwise, not 0)
 
-With --sensor, each of rpm, map, cht, egt, oil also gets a noisy value
-column and an _ok flag (1 valid, 0 dropped; value is 0 when dropped):
+`uuid` and `synced_at` exist for the (future) Go sync tool, which pushes
+runs where `synced_at IS NULL` to a server and marks them.
 
-  s_rpm s_rpm_ok s_map_kpa s_map_ok s_cht_c s_cht_ok
-  s_egt_c s_egt_ok s_oil_c s_oil_ok
+New physics channels don't need this file, twin_sim.c, or plot_run.py
+edited -- the samples schema and every column plot_run.py can plot are
+both generated from model_channels() at runtime.
 
-The sensor stream is deterministic for a given --seed.
+Poking at a run directly, e.g. with the sqlite3 CLI:
+
+  sqlite3 runs/twin_sim.db "select id, profile, status from runs;"
+  sqlite3 runs/twin_sim.db "select t, rpm, cht_c from samples where run_id=1;"
 
 Examples:
 
   twin_sim --list
-  twin_sim --profile cruise-climb > runs/cc.csv
-  twin_sim -p rapid-throttle --sensor --dt 0.01 --duration 90 > runs/rt.csv
+  twin_sim --profile cruise-climb
+  twin_sim -p rapid-throttle --sensor --dt 0.01 --duration 90
   twin_sim -p takeoff --duration 120 --cyl 3:leak=0.35 --cyl 2:cool=0.82 \
-           --fault-at 45 > runs/fault.csv
+           --fault-at 45 --db runs/fault.db
 
 
 plot_run.py
 
-Draws a twin_sim CSV as a plain stacked multi-panel figure (default
-matplotlib styling) with a two-line metadata header: speed/command,
-temperature, manifold/torque, and altitude panels. Max markers are placed
-on CHT and EGT. Columns are matched by name, so extra columns added later
-are ignored rather than shifting the layout. --y overrides the layout with
-an explicit column list on a single panel.
+Reads one run out of a twin_sim database and draws it as a plain stacked
+multi-panel figure (default matplotlib styling) with a two-line metadata
+header: speed/command, temperature, manifold/torque, and altitude panels.
+Max markers are placed on CHT and EGT. Columns are matched by name, so
+extra columns added later are ignored rather than shifting the layout.
+--y overrides the layout with an explicit column list on a single panel.
 
-Run metadata (profile, load, seed) comes from twin_sim's '# ...' stderr
-banner -- present in --sim mode; for a plain file, redirect with 2>&1 or it
-shows as '--'. dt / duration / sample rate are always inferred from the data.
+Run metadata (profile, dt, duration, load, seed, sensor on/off, started_at)
+comes straight from the run's row in the database -- always present,
+nothing to parse.
 
 Setup:
 
@@ -104,10 +112,11 @@ Setup:
 
 Usage:
 
-  python tools/plot_run.py CSV [options]
-  python tools/plot_run.py -   [options]          read CSV from stdin
+  python tools/plot_run.py DB [options]
   python tools/plot_run.py [options] --sim TWIN_SIM_ARGS...
 
+  DB                  path to a twin_sim SQLite database
+  --run ID            run id to plot (default: the most recent in DB)
   --y COL [COL ...]   plot exactly these columns, skip the panel layout
   --sensor           overlay the s_* channels on their truth lines
   --limits           overlay caution / redline lines (off by default)
@@ -117,27 +126,23 @@ Usage:
   --height N         figure height in inches (default: 8)
   --twin-sim PATH    twin_sim binary for --sim (default: build/twin_sim)
 
---sim consumes every argument after it and hands them to twin_sim, so put
-plot_run options before --sim. A --sensor inside the --sim args turns on
-the overlay here too.
+--sim consumes every argument after it and hands them to twin_sim, then
+reads back whichever run it just logged (twin_sim reports its run_id/db on
+stdout on completion). Put plot_run options before --sim. A --sensor
+inside the --sim args turns on the overlay here too.
 
 The --limits caution/redline values are placeholders in LIMITS at the top
 of plot_run.py -- tune them alongside the physics constants.
 
 Examples:
 
-  python tools/plot_run.py runs/cc.csv
-  python tools/plot_run.py runs/cc.csv --y cht_c egt_c oil_c
+  python tools/plot_run.py runs/twin_sim.db
+  python tools/plot_run.py runs/twin_sim.db --run 3
+  python tools/plot_run.py runs/twin_sim.db --y cht_c egt_c oil_c
   python tools/plot_run.py --out runs/rt.png --sim -p hot-day --sensor
-  twin_sim -p hot-day | python tools/plot_run.py -
 
 
 Notes
 
-Run outputs belong in runs/ (gitignored). CSVs are regenerable from
+Run databases belong in runs/ (gitignored). They're regenerable from
 twin_sim, so don't commit them.
-
-plot_run.py auto-detects the encoding -- UTF-8, UTF-8/UTF-16 with a BOM,
-or BOM-less UTF-16 -- and skips '#' lines, so a PowerShell-redirected file
-(`twin_sim ... > run.csv` writes UTF-16 there) or one with the stderr
-banner merged in still loads.
