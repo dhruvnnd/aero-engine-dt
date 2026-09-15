@@ -50,6 +50,28 @@ if(WIN32 AND EXISTS "${SDL3_VENDOR_DIR}/bin/SDL3.dll")
 endif()
 
 # ---------------------------------------------------------------------------
+# sqlite3: vendored amalgamation for run_log (src/data). Built as its own
+# static library, separate from engine_core, so it compiles once with its
+# own (relaxed) warning settings instead of every engine_core rebuild
+# reprocessing a ~250K-line third-party file under -Wall -Wextra.
+# ---------------------------------------------------------------------------
+set(SQLITE3_VENDOR_DIR "${CMAKE_SOURCE_DIR}/third_party/sqlite3/sqlite-amalgamation-3530400")
+
+if(EXISTS "${SQLITE3_VENDOR_DIR}/sqlite3.c")
+  add_library(sqlite3 STATIC "${SQLITE3_VENDOR_DIR}/sqlite3.c")
+  target_include_directories(sqlite3 PUBLIC "${SQLITE3_VENDOR_DIR}")
+  target_compile_options(sqlite3 PRIVATE -O2)
+  if(WIN32)
+    target_compile_definitions(sqlite3 PRIVATE _CRT_SECURE_NO_WARNINGS)
+  endif()
+else()
+  message(FATAL_ERROR
+    "sqlite3 amalgamation not found at ${SQLITE3_VENDOR_DIR}. Download "
+    "sqlite-amalgamation-<version>.zip from https://sqlite.org/download.html "
+    "and extract it under third_party/sqlite3/ (see tools/README).")
+endif()
+
+# ---------------------------------------------------------------------------
 # engine_core: math/physics/telemetry/health/ml/mission/model/data/util.
 # Pure C, no SDL dependency by convention -- this is what tests/ links
 # against so the physics model is testable headless.
@@ -70,6 +92,7 @@ if(CORE_SOURCES)
   add_library(engine_core STATIC ${CORE_SOURCES})
   target_include_directories(engine_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
   target_compile_options(engine_core PRIVATE -Wall -Wextra)
+  target_link_libraries(engine_core PUBLIC sqlite3)
 else()
   # Nothing under those directories yet -- keep the target valid so the
   # rest of the build still links cleanly while the project is scaffolded.
@@ -77,6 +100,7 @@ else()
   # just skips warning flags until there's actually a .c file to apply them to.)
   add_library(engine_core INTERFACE)
   target_include_directories(engine_core INTERFACE ${CMAKE_SOURCE_DIR}/src)
+  target_link_libraries(engine_core INTERFACE sqlite3)
 endif()
 
 # ---------------------------------------------------------------------------
