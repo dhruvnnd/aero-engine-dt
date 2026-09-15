@@ -82,7 +82,13 @@ static void test_clogged_injector_cuts_fuel_and_leans_cylinder(void) {
   run(&clogged, &cs, &in, 60.0);
 
   double ratio = cs.fuel.fuel_flow_kgph / hs.fuel.fuel_flow_kgph;
-  CHECK(ratio > 0.83 && ratio < 0.98); /* ~3.75/4, minus a little from lower rpm */
+  /* Not just the ~3.75/4 injector-trim ratio: the real crank-angle torque
+   * model (physics/crank_thermo.h) makes one weak cylinder pull down overall
+   * RPM more than the old mean-value model did, so air flow (and hence fuel
+   * flow) drops further too. Bounds widened from the old model's narrower
+   * band to reflect this -- the fault having a bigger, more realistic
+   * knock-on effect is the point of Phase 1, not a regression. */
+  CHECK(ratio > 0.70 && ratio < 0.90);
   CHECK(cs.cyl[1].lambda > 1.25);      /* that cylinder runs lean */
   CHECK_NEAR(cs.cyl[1].misfire_rate, 0.0, 0.0); /* ...but not misfiring */
   CHECK_NEAR(cs.cyl[0].lambda, 1.0, 1e-9);      /* the others unaffected */

@@ -88,15 +88,31 @@ static void test_cht_settles_near_load_scaled_target(void) {
   model_state_init(&st, &sync.engine_config, amb);
   EngineInput in = make_input(0.7, 35.0, 101.325);
   EnvInput env = env_at(amb); /* sea level, still air */
-  for (int i = 0; i < 120000; i++) { /* 1200 s -> well past CHT tau */
+  for (int i = 0; i < 110000; i++) { /* 1100 s -> well past CHT tau */
     model_sync_step(&sync, &st, &in, &env, 0.01);
   }
-  double lf =
-      combustion_load_fraction(st.engine.map_kpa, st.engine.omega_rad_s);
+  /* Phase 1 (crank_thermo.h) has every cylinder firing in the same phase
+   * (true multi-cylinder staggering is Phase 2), so the crank-speed/MAP
+   * operating point settles into a small sustained oscillation rather than
+   * a perfect fixed point -- CHT itself is a slow enough filter that it
+   * settles smoothly regardless (its own tau averages the ripple out), but
+   * comparing it against a target built from a single instantaneous
+   * lf/cool_index sample can land anywhere in that ripple. Average lf and
+   * cool_index over a trailing window instead, matching what the slow CHT
+   * filter is actually converging toward. */
+  double lf_sum = 0.0, cool_sum = 0.0;
+  const int trailing_steps = 10000; /* last 100 s */
+  for (int i = 0; i < trailing_steps; i++) {
+    model_sync_step(&sync, &st, &in, &env, 0.01);
+    lf_sum +=
+        combustion_load_fraction(st.engine.map_kpa, st.engine.omega_rad_s);
+    cool_sum += environment_cool_index(st.env.density_kg_m3,
+                                       st.env.airspeed_ms, st.rpm);
+  }
+  double lf = lf_sum / trailing_steps;
+  double cool = cool_sum / trailing_steps;
   /* Still air + thin-ish sea-level ram gives cool_index < 1, so the CHT
    * target is the load-scaled rise divided by sqrt(cool_index). */
-  double cool = environment_cool_index(st.env.density_kg_m3, st.env.airspeed_ms,
-                                       st.rpm);
   double target =
       amb + thermal_rise_c(sync.thermal_config.cht_rise_rated_c, lf) /
                 thermal_cool_divisor(cool);
