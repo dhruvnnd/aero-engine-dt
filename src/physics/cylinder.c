@@ -10,7 +10,7 @@ static double cht_cool_factor(const CylinderConfig *c) {
 
 /* Per-cylinder AFR ratio: extra fuel richens (lambda < 1), an intake leak
  * or a lean injector leans it (lambda > 1). */
-static double cylinder_lambda(const CylinderConfig *c) {
+double cylinder_lambda(const CylinderConfig *c) {
   double flow = c->injector_flow_trim > 0.05 ? c->injector_flow_trim : 0.05;
   return (1.0 / flow) * (1.0 + c->intake_leak_frac);
 }
@@ -32,7 +32,7 @@ static double egt_trim_factor(const CylinderConfig *c) {
 }
 
 /* Fraction of recent cycles that fail to fire, from the mixture strength. */
-static double misfire_fraction(double lambda) {
+double misfire_fraction(double lambda) {
   if (lambda < 0.55 || lambda > 1.55) {
     return 1.0; /* outside the flammability band */
   }
@@ -101,6 +101,7 @@ void cylinder_state_init(CylinderState *state, double ambient_temp_c) {
   state->ca50_deg = 0.0;
   state->fuel_pw_ms = 0.0;
   state->misfire_rate = 0.0;
+  state->cyl_pressure_kpa = 101.325;
 }
 
 enum { CN_CHT = 0, CN_EGT = 1, CN_COUNT };
@@ -133,8 +134,7 @@ void cylinder_step(CylinderState *state, const CylinderConfig *config,
   double cool_div = thermal_cool_divisor(cool_index);
 
   CylDerivParams p;
-  p.cht_target_c =
-      ambient_c + cht_rise / cht_cool_factor(config) / cool_div;
+  p.cht_target_c = ambient_c + cht_rise / cht_cool_factor(config) / cool_div;
   p.egt_target_c = ambient_c + egt_rise * egt_trim_factor(config);
   p.cht_tau_s = thermal_cfg->cht_tau_s;
   p.egt_tau_s = thermal_cfg->egt_tau_s;

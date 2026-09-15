@@ -21,6 +21,7 @@ typedef struct {
   double ca50_deg; /* crank angle of 50% burn, deg ATDC (combustion phasing) */
   double fuel_pw_ms;   /* injector pulse width */
   double misfire_rate; /* fraction of recent cycles that failed to fire, 0..1 */
+  double cyl_pressure_kpa; /* in-cylinder pressure */
 } CylinderState;
 
 /* All trims nominal (a healthy cylinder). */
@@ -50,5 +51,12 @@ double cylinder_torque_nm(const CylinderConfig *config, double map_kpa,
  * cylinders healthy this equals combustion_indicated_torque_nm(). */
 double cylinders_total_torque_nm(const CylinderConfig *cyl, int num_cylinders,
                                  double map_kpa, double omega_rad_s);
+
+/* This cylinder's air/fuel equivalence ratio from its trims alone (>1.0 =
+ * lean, from injector_flow_trim < 1.0 and/or intake_leak_frac > 0) */
+double cylinder_lambda(const CylinderConfig *c);
+
+/* Fraction of cycles that fail to fire outright */
+double misfire_fraction(double lambda);
 
 #endif /* PHYSICS_CYLINDER_H */
