@@ -111,6 +111,40 @@ EngineSpecResult engine_spec_load(const char *path, EngineConfig *out) {
     } else if (strcmp(key, "friction_coeff_nm_per_rad_s") == 0) {
       parse_ok =
           (parse_double_strict(value, &out->friction_coeff_nm_per_rad_s) == 0);
+    } else if (strcmp(key, "bore_m") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.bore_m) == 0);
+    } else if (strcmp(key, "stroke_m") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.stroke_m) == 0);
+    } else if (strcmp(key, "conrod_len_m") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.conrod_len_m) == 0);
+    } else if (strcmp(key, "compression_ratio") == 0) {
+      parse_ok =
+          (parse_double_strict(value, &out->geom.compression_ratio) == 0);
+    } else if (strcmp(key, "ivc_deg") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.ivc_deg) == 0);
+    } else if (strcmp(key, "evo_deg") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.evo_deg) == 0);
+    } else if (strcmp(key, "m_recip_kg") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.m_recip_kg) == 0);
+    } else if (strcmp(key, "wiebe_a") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.wiebe_a) == 0);
+    } else if (strcmp(key, "wiebe_m") == 0) {
+      parse_ok = (parse_double_strict(value, &out->geom.wiebe_m) == 0);
+    } else if (strcmp(key, "delta_theta_burn_deg") == 0) {
+      parse_ok =
+          (parse_double_strict(value, &out->geom.delta_theta_burn_deg) == 0);
+    } else if (strcmp(key, "spark_base_btdc_deg") == 0) {
+      parse_ok =
+          (parse_double_strict(value, &out->geom.spark_base_btdc_deg) == 0);
+    } else if (strcmp(key, "spark_rpm_gain_deg_per_1000rpm") == 0) {
+      parse_ok = (parse_double_strict(
+                      value, &out->geom.spark_rpm_gain_deg_per_1000rpm) == 0);
+    } else if (strcmp(key, "spark_map_retard_deg_per_kpa") == 0) {
+      parse_ok = (parse_double_strict(
+                      value, &out->geom.spark_map_retard_deg_per_kpa) == 0);
+    } else if (strcmp(key, "combustion_efficiency") == 0) {
+      parse_ok =
+          (parse_double_strict(value, &out->geom.combustion_efficiency) == 0);
     } else {
       fprintf(stderr, "engine_spec: %s:%d: unknown key '%s' -- ignored\n", path,
               lineno, key);
@@ -167,9 +201,7 @@ int engine_spec_save(const char *path, const EngineConfig *cfg) {
 
   fprintf(f,
           "# Manifold filling time constant, s -- how fast MAP chases its\n"
-          "# throttle target. Typical range: 0.1 - 0.4. (Replaced by a real\n"
-          "# mass-balance ODE in a later phase; still the live MAP dynamics\n"
-          "# for now.)\n"
+          "# throttle target. Typical range: 0.1 - 0.4.\n"
           "map_tau_s = %.6g\n\n",
           cfg->map_tau_s);
 
@@ -178,6 +210,71 @@ int engine_spec_save(const char *path, const EngineConfig *cfg) {
           "# speed. Typical range: 0.05 - 0.2.\n"
           "friction_coeff_nm_per_rad_s = %.6g\n\n",
           cfg->friction_coeff_nm_per_rad_s);
+
+  fprintf(f, "# crank-angle-resolved combustion geometry, shared by\n"
+             "# every cylinder (a cylinder's own compression_trim etc. scale\n"
+             "# off this)\n\n");
+
+  fprintf(f,
+          "# Cylinder bore, m. Typical small aero/auto range: 0.07 - 0.10.\n"
+          "bore_m = %.6g\n\n"
+          "# Piston stroke, m. Typical range: 0.07 - 0.10.\n"
+          "stroke_m = %.6g\n\n"
+          "# Connecting rod length, m. Must exceed stroke_m/2 for the\n"
+          "# slider-crank geometry to close. Typical range: 0.12 - 0.20.\n"
+          "conrod_len_m = %.6g\n\n"
+          "# Nominal compression ratio (Vd/Vc + 1), before a cylinder's own\n"
+          "# compression_trim. Typical NA gasoline range: 8.5 - 11.\n"
+          "compression_ratio = %.6g\n\n",
+          cfg->geom.bore_m, cfg->geom.stroke_m, cfg->geom.conrod_len_m,
+          cfg->geom.compression_ratio);
+
+  fprintf(f,
+          "# Intake valve close and exhaust valve open, crank degrees in\n"
+          "# the [0,720) convention documented in physics/crank_thermo.h\n"
+          "# (0 = TDC at start of power stroke). Must satisfy\n"
+          "# evo_deg < ivc_deg. Typical ivc_deg range: 570 - 610 (ABDC of\n"
+          "# the intake stroke); typical evo_deg range: 110 - 150 (BBDC of\n"
+          "# the power stroke).\n"
+          "evo_deg = %.6g\n"
+          "ivc_deg = %.6g\n\n",
+          cfg->geom.evo_deg, cfg->geom.ivc_deg);
+
+  fprintf(f,
+          "# Reciprocating mass per cylinder (piston + pin + ~1/3 conrod\n"
+          "# mass), kg -- drives the inertia-torque term. Typical range:\n"
+          "# 0.3 - 0.6.\n"
+          "m_recip_kg = %.6g\n\n",
+          cfg->geom.m_recip_kg);
+
+  fprintf(f,
+          "# Wiebe combustion heat-release shape: efficiency parameter\n"
+          "# (typical 3 - 6), shape parameter (typical 2 - 3), and total\n"
+          "# burn duration in crank degrees (typical 40 - 60).\n"
+          "wiebe_a = %.6g\n"
+          "wiebe_m = %.6g\n"
+          "delta_theta_burn_deg = %.6g\n\n",
+          cfg->geom.wiebe_a, cfg->geom.wiebe_m, cfg->geom.delta_theta_burn_deg);
+
+  fprintf(f,
+          "# Spark advance curve (deg BTDC = base + rpm_gain*(rpm/1000) -\n"
+          "# map_retard*(map_kpa-30)), clamped to [5,35] deg BTDC. Typical\n"
+          "# ranges: base 5-20, rpm_gain 3-8, map_retard 0.05-0.25.\n"
+          "spark_base_btdc_deg = %.6g\n"
+          "spark_rpm_gain_deg_per_1000rpm = %.6g\n"
+          "spark_map_retard_deg_per_kpa = %.6g\n\n",
+          cfg->geom.spark_base_btdc_deg,
+          cfg->geom.spark_rpm_gain_deg_per_1000rpm,
+          cfg->geom.spark_map_retard_deg_per_kpa);
+
+  fprintf(f,
+          "# Fraction of the fuel's chemical energy that manifests as\n"
+          "# effective in-cylinder heat (the rest lost to cylinder walls\n"
+          "# and exhaust -- this single-zone model has no Woschni-style\n"
+          "# heat-transfer correlation, so this stands in for it). Typical\n"
+          "# range: 0.25 - 0.35; must be in (0,1].\n"
+          "combustion_efficiency = %.6g\n",
+          cfg->geom.combustion_efficiency);
 
   fclose(f);
   return 0;

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "physics/crank_thermo.h"
 #include "physics/engine_model.h"
 #include "physics/engine_spec_io.h"
 
@@ -142,6 +143,28 @@ static int cmd_check(const char *path) {
   printf("map_tau_s                    = %.6g\n", cfg.map_tau_s);
   printf("friction_coeff_nm_per_rad_s  = %.6g\n",
          cfg.friction_coeff_nm_per_rad_s);
+
+  printf("bore_m / stroke_m / conrod_len_m = %.6g / %.6g / %.6g\n",
+         cfg.geom.bore_m, cfg.geom.stroke_m, cfg.geom.conrod_len_m);
+  printf("compression_ratio            = %.6g\n", cfg.geom.compression_ratio);
+  printf("evo_deg / ivc_deg             = %.6g / %.6g\n", cfg.geom.evo_deg,
+         cfg.geom.ivc_deg);
+  printf("m_recip_kg                    = %.6g\n", cfg.geom.m_recip_kg);
+  printf("wiebe_a / wiebe_m / burn_deg  = %.6g / %.6g / %.6g\n",
+         cfg.geom.wiebe_a, cfg.geom.wiebe_m, cfg.geom.delta_theta_burn_deg);
+  printf("spark base/rpm_gain/map_retard = %.6g / %.6g / %.6g\n",
+         cfg.geom.spark_base_btdc_deg, cfg.geom.spark_rpm_gain_deg_per_1000rpm,
+         cfg.geom.spark_map_retard_deg_per_kpa);
+  printf("combustion_efficiency         = %.6g\n",
+         cfg.geom.combustion_efficiency);
+
+  double displacement_l =
+      cylinder_displacement_m3(&cfg.geom) * cfg.num_cylinders * 1000.0;
+  double clearance_cc =
+      cylinder_clearance_m3(&cfg.geom, cfg.geom.compression_ratio) * 1.0e6;
+  printf("\ntotal displacement            = %.3f L (%d cyl)\n", displacement_l,
+         cfg.num_cylinders);
+  printf("clearance volume (per cyl)    = %.2f cc\n", clearance_cc);
   return 0;
 }
 
