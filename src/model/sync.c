@@ -23,15 +23,19 @@ void model_sync_init(ModelSync *sync) {
 
 void model_sync_step(ModelSync *sync, ModelState *state,
                      const EngineInput *input, const EnvInput *env, double dt) {
-  engine_model_step(&state->engine, &sync->engine_config, input,
-                    sync->cyl_config, sync->sim_time_s, dt);
-
+  /* Computed first (it only depends on `env`, not engine state) so its
+   * ambient_temp_c is available to feed engine_model_step()'s combustion-
+   * energy calculation this same step, rather than lagging a frame behind. */
   environment_state(&state->env, env->altitude_m, env->oat_offset_c,
                     env->airspeed_ms);
   double ambient_temp_c = state->env.oat_c;
 
+  engine_model_step(&state->engine, &sync->engine_config, input,
+                    &sync->fuel_config, sync->cyl_config, state->cyl,
+                    ambient_temp_c, sync->sim_time_s, dt);
+
   /* Thermal drivers from the current (post-step) operating point: raw waste
-   * heat for the oil node, load fraction for the saturating CHT/EGT nodes. */
+   * heat for the oil node, load fraction for the saturating CHT/EGT nodes */
   double waste_heat_w =
       combustion_waste_heat_w(state->engine.map_kpa, state->engine.omega_rad_s);
   double load_frac = combustion_load_fraction(state->engine.map_kpa,
@@ -55,10 +59,6 @@ void model_sync_step(ModelSync *sync, ModelState *state,
 
   model_state_refresh_derived(state);
 
-  state->torque_nm = cylinders_total_torque_nm(
-      sync->cyl_config, sync->engine_config.num_cylinders,
-      state->engine.map_kpa, state->engine.omega_rad_s);
-
   /* Fuel path reads the settled operating point (rpm just refreshed above);
    * intake temp is the ambient proxy until MAT lands. */
   fuel_step(&state->fuel, &sync->fuel_config, sync->cyl_config,
@@ -69,6 +69,8 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   lube_step(&state->lube, &sync->lube_config, state->rpm,
             state->thermal.oil_temp_c);
 
-  /* Charging system from the settled crank speed. */
-  elec_step(&state->elec, &sync->elec_config, state->rpm, dt);
+  /* Charging system from the settled crank speed. Cranking draws starter
+   * current from the battery on top of the usual accessory load */
+  elec_step(&state->elec, &sync->elec_config, state->rpm,
+            state->engine.run_state == ENGINE_CRANKING, dt);
 }
