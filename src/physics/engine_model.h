@@ -58,81 +58,18 @@ typedef struct {
   double starter_catch_rpm;
 } EngineConfig;
 
-/* Plausible placeholder parameters for a small aero piston engine, to use
- * until real performance-map data replaces them (data/perf_maps.c, later
- * phase). Not sourced from a specific engine's spec sheet -- tune these
- * once you have real numbers to match against. */
 EngineConfig engine_config_default(void);
 
-/* Sets state to a cold-idle starting point, engine already ENGINE_RUNNING
- * (rotation; thermal-adjacent fields the caller owns elsewhere are
- * untouched -- this only sets the EngineState fields above). This is the
- * "app just booted, pretend the engine is already up" convenience used by
- * model_state_init() and most tests -- it does NOT model a start sequence.
- * For that, from ENGINE_STOPPED, use engine_model_start() instead. */
+/* Sets state to a cold-idle starting point */
 void engine_model_init(EngineState *state, const EngineConfig *config);
 
-/* Begins starting a STOPPED engine (state->run_state == ENGINE_STOPPED):
- * clears every active cylinder's pressure to a sane ambient-ish baseline and
- * moves to ENGINE_CRANKING. Deliberately does NOT touch omega_rad_s/theta_deg
- * or anything outside EngineState/CylinderState.cyl_pressure_kpa (in
- * particular thermal/fuel/electrical state stays exactly as it was -- a
- * stall doesn't cool the engine down or drain the battery) -- crank speed
- * builds up from wherever it already is (normally ~0, at rest) via the
- * starter torque applied in engine_model_step() while ENGINE_CRANKING,
- * exactly like a real starter motor spinning up a stopped engine. A no-op if
- * the engine isn't ENGINE_STOPPED (mirrors a real ignition switch: cranking
- * an already-running engine does nothing). `cyl_states` is an array of at
- * least config->num_cylinders entries, same as engine_model_step(). Whether
- * a start attempt should even be allowed (e.g. battery too weak) is the
- * caller's call -- this function doesn't know about ElecState. */
+/* Begins starting a STOPPED engine (state->run_state == ENGINE_STOPPED) */
 void engine_model_start(EngineState *state, const EngineConfig *config,
                         CylinderState *cyl_states);
 
-/* Deliberate manual shutdown -- an ignition-off key turn, distinct from an
- * involuntary stall. If ENGINE_RUNNING: cuts ignition (state->ignition_on =
- * 0), which forces every cylinder to full misfire in engine_derivative() --
- * no more combustion energy is added, so the engine coasts down under
- * friction and load exactly like a stall does, and engine_model_step()'s
- * existing stall-floor logic transitions it to ENGINE_STOPPED once speed
- * decays below ENGINE_STALL_RPM. Deliberately does NOT teleport straight to
- * ENGINE_STOPPED -- a real engine keeps spinning for a moment after key-off.
- * If ENGINE_CRANKING: the starter is on the same ignition switch, so this
- * aborts the crank immediately back to ENGINE_STOPPED (no coast-down --
- * there's no momentum to speak of yet). A no-op if already ENGINE_STOPPED. */
+/* Deliberate manual shutdown */
 void engine_model_stop(EngineState *state);
 
-/* Advances state by dt seconds under the given input, using RK4. `dt` is a
- * *frame* time (whatever the caller's render/tick interval is) -- internally
- * this sub-steps at a fixed, much finer resolution so crank-angle-scale
- * dynamics integrate accurately regardless of frame rate; that sub-stepping
- * is purely an implementation detail and callers don't need to do anything
- * differently. Each active cylinder (config->num_cylinders of them) gets its
- * own crank-angle-resolved pressure trace (physics/crank_thermo.h), sharing
- * the crank's theta_deg -- true per-cylinder phase staggering is Phase 2.
- * `cylinders` (trims) and `cyl_states` (persistent per-cylinder state,
- * notably cyl_pressure_kpa) are each arrays of at least config->num_cylinders
- * entries. `fuel_cfg` supplies AFR for the combustion-energy calculation.
- * `intake_temp_c` is the charge temperature used for the trapped-mass
- * calculation (ambient temperature is the caller's usual proxy for this,
- * same as physics/fuel.h's air_flow_gps()). `t` is the current sim time, s.
- *
- * State machine: if `state->run_state` is ENGINE_STOPPED, this is a no-op
- * other than zeroing torque_nm -- call engine_model_start() to begin
- * cranking. If ENGINE_CRANKING, `config->starter_torque_nm` is added to the
- * torque balance on top of whatever combustion is doing (both are active
- * simultaneously -- a real starter doesn't wait for combustion to be silent
- * either), and once crank speed exceeds `config->starter_catch_rpm` the
- * state moves to ENGINE_RUNNING and the starter torque stops applying. If
- * ENGINE_RUNNING, behaves as a normal combustion-only engine. In any active
- * state, crank speed is not allowed to cross zero into reverse rotation: the
- * combustion model assumes forward rotation only, and nothing in it was
- * designed to behave sensibly run backward. Once speed would drop below a
- * small stall threshold, the engine is marked ENGINE_STOPPED instead
- * (everything holds at rest) rather than continuing to integrate -- this
- * applies during cranking too, e.g. if starter_torque_nm can't overcome the
- * load.
- */
 void engine_model_step(EngineState *state, const EngineConfig *config,
                        const EngineInput *input, const FuelConfig *fuel_cfg,
                        const CylinderConfig *cylinders,

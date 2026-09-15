@@ -234,7 +234,12 @@ int main(int argc, char **argv) {
   const char *profile_name = "idle";
   double dt = 0.02;
   double duration_s = -1.0; /* < 0 => use the profile's default */
-  double load_nm = 40.0;
+  /* Placeholder load until Phase 4's real propeller model exists (load
+   * should scale with RPM, not stay constant) -- 8.0 leaves a sustainable
+   * margin at idle MAP with Phase 1's real combustion torque; the old 40.0
+   * was calibrated against the pre-Phase-1 mean-value curve and stalls the
+   * default "idle" profile (closed throttle) immediately now. */
+  double load_nm = 8.0;
   uint32_t seed = 1u;
   int with_sensor = 0;
   double fault_at_s = 0.0;

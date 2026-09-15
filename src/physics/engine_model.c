@@ -246,13 +246,6 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
                                             params.eff_cr[i]);
   }
 
-  /* While cranking, the engine legitimately starts at/near 0 RPM and climbs
-   * gradually as the starter (and, once combustion contributes, the
-   * cylinders) spin it up -- it has no business being anywhere near
-   * ENGINE_STALL_RPM yet, so that floor doesn't apply. The only thing that
-   * actually needs guarding against here is the same reverse-rotation
-   * failure mode as running (e.g. the starter genuinely can't overcome the
-   * load), so the floor while cranking is just "don't go negative." */
   const double stall_omega_rad_s =
       was_cranking ? 0.0 : rpm_to_rad_s(ENGINE_STALL_RPM);
 
@@ -277,14 +270,6 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
     torque_accum += cylinders_total_torque_from_vec(vec, &params);
     substeps++;
 
-    /* Crank speed dropping below the stall threshold (or, from a bad
-     * transient, all the way through zero into reverse) stops the engine
-     * here rather than letting it continue: the combustion model assumes
-     * forward rotation only, and if speed keeps dropping unchecked, the
-     * angle-based sub-step size above (inversely proportional to |omega|)
-     * would keep shrinking as speed swings more negative, making this loop
-     * take pathologically many iterations per frame -- this is what froze
-     * the whole program before this check existed. */
     if (vec[ENGINE_STATE_OMEGA] < stall_omega_rad_s) {
       vec[ENGINE_STATE_OMEGA] = 0.0;
       stalled = 1;
@@ -300,10 +285,6 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
     state->run_state = ENGINE_STOPPED;
   } else if (was_cranking &&
              state->omega_rad_s >= rpm_to_rad_s(config->starter_catch_rpm)) {
-    /* Caught: combustion has carried speed past the catch threshold, so the
-     * starter disengages -- checked once per frame (not mid-sub-step-loop)
-     * for simplicity; being off by a fraction of a frame doesn't matter
-     * physically. */
     state->run_state = ENGINE_RUNNING;
   }
 
