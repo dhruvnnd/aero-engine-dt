@@ -17,6 +17,8 @@ $DistDir    = Join-Path $RepoRoot "dist"
 $StageDir   = Join-Path $DistDir $StageName
 $ZipPath    = Join-Path $DistDir "$StageName.zip"
 
+$SyncExePath = Join-Path $BuildDir "aero-sync.exe"
+
 if (-not $SkipBuild) {
     Write-Host "Configuring Release build..." -ForegroundColor Cyan
     cmake -S $RepoRoot -B $BuildDir -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
@@ -25,12 +27,17 @@ if (-not $SkipBuild) {
     Write-Host "Building aero_engine_dt, twin_sim, twin_config (Release)..." -ForegroundColor Cyan
     cmake --build $BuildDir --config Release --target aero_engine_dt twin_sim twin_config
     if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+
+    Write-Host "Building aero-sync (Go, static, no cgo)..." -ForegroundColor Cyan
+    go build -C (Join-Path $RepoRoot "sync") -o $SyncExePath .
+    if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 }
 
 $ExePath = Join-Path $BuildDir "aero_engine_dt.exe"
 $DllPath = Join-Path $BuildDir "SDL3.dll"
 if (-not (Test-Path $ExePath)) { throw "Missing $ExePath -- build failed?" }
 if (-not (Test-Path $DllPath)) { throw "Missing $DllPath -- SDL3 vendor kit not found next to the exe" }
+if (-not (Test-Path $SyncExePath)) { throw "Missing $SyncExePath -- go build failed?" }
 
 Write-Host "Staging distributable at $StageDir ..." -ForegroundColor Cyan
 if (Test-Path $StageDir) { Remove-Item -Recurse -Force $StageDir }
@@ -40,6 +47,7 @@ Copy-Item $ExePath $StageDir
 Copy-Item $DllPath $StageDir
 Copy-Item (Join-Path $BuildDir "twin_sim.exe") $StageDir -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $BuildDir "twin_config.exe") $StageDir -ErrorAction SilentlyContinue
+Copy-Item $SyncExePath $StageDir
 Copy-Item (Join-Path $RepoRoot "configs") $StageDir -Recurse
 
 @"
@@ -60,10 +68,15 @@ Custom engine config:
 
 Headless tools (optional, run from a terminal):
   twin_sim.exe --list
-  twin_sim.exe --profile cruise-climb > run.csv
+  twin_sim.exe --profile cruise-climb --db runs\cc.db
+
+Sync tool (optional, uploads logged runs to a server):
+  aero-sync.exe -db runs\twin_sim.db -dry-run
+  aero-sync.exe -db runs\twin_sim.db -server https://your-server
 
 Requirements: Windows 10 or later, 64-bit. Nothing else to install --
-SDL3.dll must stay next to the .exe.
+SDL3.dll must stay next to aero_engine_dt.exe. aero-sync.exe needs
+nothing else at all (no DLL, no runtime).
 "@ | Out-File -FilePath (Join-Path $StageDir "README.txt") -Encoding utf8
 
 if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
