@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -213,6 +214,52 @@ func TestMarkSynced_RemovesRunFromPending(t *testing.T) {
 	if gotBackendRunID != "backend-uuid-xyz" {
 		t.Errorf("backend_run_id = %q, want backend-uuid-xyz", gotBackendRunID)
 	}
+}
+
+// A .db predating the backend_run_id column must fail at Open(), not
+// later at MarkSynced() -- surfacing it after a successful upload leaves
+// the run stuck pending with no local record of the upload, which risks a
+// duplicate on the next sync attempt. See the real incident this guards
+// against: an operator's pre-migration mytest.db passed Open() fine,
+// uploaded two runs successfully, then failed at MarkSynced with "no such
+// column: backend_run_id" -- both runs stayed pending afterward.
+func TestOpen_RejectsSchemaMissingBackendRunID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stale.db")
+	seed, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening fixture for seeding: %v", err)
+	}
+	defer seed.Close()
+
+	if _, err := seed.Exec(`
+		CREATE TABLE runs (
+		  id INTEGER PRIMARY KEY,
+		  uuid TEXT NOT NULL UNIQUE,
+		  source TEXT NOT NULL,
+		  status TEXT NOT NULL DEFAULT 'running',
+		  synced_at TEXT
+		);
+		CREATE TABLE samples (id INTEGER PRIMARY KEY, run_id INTEGER, t REAL);
+	`); err != nil {
+		t.Fatalf("creating stale schema: %v", err)
+	}
+
+	_, err = Open(path)
+	if err == nil {
+		t.Fatal("Open() on a pre-backend_run_id db: got nil error, want one")
+	}
+	if !containsAll(err.Error(), "backend_run_id", "migrate") {
+		t.Errorf("Open() error = %q, want it to mention backend_run_id and how to fix it", err)
+	}
+}
+
+func containsAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestMarkSynced_UnknownRunIsAnError(t *testing.T) {

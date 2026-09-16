@@ -63,7 +63,10 @@ type Store struct {
 	db *sql.DB
 }
 
-// Open opens the run_log database at path
+// Open opens the run_log database at path. Fails fast if the schema
+// predates a column this package depends on, rather than letting a later
+// call (MarkSynced, specifically) fail after an upload has already
+// succeeded
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -73,6 +76,23 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: opening %s: %w", path, err)
 	}
+
+	var hasBackendRunID bool
+	err = db.QueryRow(
+		`SELECT count(*) > 0 FROM pragma_table_info('runs') WHERE name = 'backend_run_id';`,
+	).Scan(&hasBackendRunID)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: checking schema of %s: %w", path, err)
+	}
+	if !hasBackendRunID {
+		db.Close()
+		return nil, fmt.Errorf(
+			"store: %s predates the backend_run_id column -- run twin_sim once "+
+				"against this file (any profile/duration) to migrate its schema, then retry",
+			path)
+	}
+
 	return &Store{db: db}, nil
 }
 
