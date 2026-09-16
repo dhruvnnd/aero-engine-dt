@@ -24,7 +24,8 @@ static const char *const RUNS_DDL = "CREATE TABLE IF NOT EXISTS runs ("
                                     "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),"
                                     "  ended_at TEXT,"
                                     "  status TEXT NOT NULL DEFAULT 'running',"
-                                    "  synced_at TEXT"
+                                    "  synced_at TEXT,"
+                                    "  backend_run_id TEXT"
                                     ");";
 
 static const char *const RUNS_INSERT_SQL =
@@ -131,6 +132,30 @@ static int exec_or_warn(sqlite3 *db, const char *sql, const char *what) {
   return 0;
 }
 
+static int column_exists(sqlite3 *db, const char *table, const char *column) {
+  char sql[256];
+  snprintf(sql, sizeof(sql),
+           "SELECT count(*) FROM pragma_table_info('%s') WHERE name='%s';",
+           table, column);
+  sqlite3_stmt *s;
+  if (sqlite3_prepare_v2(db, sql, -1, &s, NULL) != SQLITE_OK) {
+    return 0;
+  }
+  int exists = (sqlite3_step(s) == SQLITE_ROW) && sqlite3_column_int(s, 0) > 0;
+  sqlite3_finalize(s);
+  return exists;
+}
+
+static int migrate_runs_table(sqlite3 *db) {
+  if (!column_exists(db, "runs", "backend_run_id")) {
+    if (exec_or_warn(db, "ALTER TABLE runs ADD COLUMN backend_run_id TEXT;",
+                     "adding backend_run_id column")) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
 RunLogStatus run_log_open(RunLog *log, const char *path) {
   memset(log, 0, sizeof(*log));
 
@@ -147,7 +172,8 @@ RunLogStatus run_log_open(RunLog *log, const char *path) {
                    "setting synchronous") ||
       exec_or_warn(log->db, "PRAGMA foreign_keys=ON;",
                    "enabling foreign keys") ||
-      exec_or_warn(log->db, RUNS_DDL, "creating runs table")) {
+      exec_or_warn(log->db, RUNS_DDL, "creating runs table") ||
+      migrate_runs_table(log->db)) {
     sqlite3_close(log->db);
     log->db = NULL;
     return RUN_LOG_ERR_SCHEMA;
