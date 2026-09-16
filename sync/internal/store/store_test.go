@@ -27,7 +27,8 @@ CREATE TABLE runs (
   started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   ended_at TEXT,
   status TEXT NOT NULL DEFAULT 'running',
-  synced_at TEXT
+  synced_at TEXT,
+  backend_run_id TEXT
 );
 CREATE TABLE samples (
   id INTEGER PRIMARY KEY,
@@ -192,7 +193,7 @@ func TestMarkSynced_RemovesRunFromPending(t *testing.T) {
 		t.Fatalf("precondition: PendingRuns() = %v, %v; want 1 run", runs, err)
 	}
 
-	if err := s.MarkSynced(runID); err != nil {
+	if err := s.MarkSynced(runID, "backend-uuid-xyz"); err != nil {
 		t.Fatalf("MarkSynced: %v", err)
 	}
 
@@ -203,11 +204,20 @@ func TestMarkSynced_RemovesRunFromPending(t *testing.T) {
 	if len(runs) != 0 {
 		t.Fatalf("got %d pending runs after MarkSynced, want 0: %+v", len(runs), runs)
 	}
+
+	var gotBackendRunID string
+	row := db.QueryRow(`SELECT backend_run_id FROM runs WHERE id = ?;`, runID)
+	if err := row.Scan(&gotBackendRunID); err != nil {
+		t.Fatalf("reading back backend_run_id: %v", err)
+	}
+	if gotBackendRunID != "backend-uuid-xyz" {
+		t.Errorf("backend_run_id = %q, want backend-uuid-xyz", gotBackendRunID)
+	}
 }
 
 func TestMarkSynced_UnknownRunIsAnError(t *testing.T) {
 	s, _ := openFixture(t)
-	if err := s.MarkSynced(999); err == nil {
+	if err := s.MarkSynced(999, "irrelevant"); err == nil {
 		t.Fatal("MarkSynced(999) on an empty db: got nil error, want one")
 	}
 }

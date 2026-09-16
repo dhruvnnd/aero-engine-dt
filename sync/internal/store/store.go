@@ -147,12 +147,16 @@ func (s *Store) Samples(runID int64) ([]SampleRow, error) {
 	return out, rows.Err()
 }
 
-// MarkSynced stamps synced_at on a run after a successful upload, so
-// PendingRuns won't return it again.
-func (s *Store) MarkSynced(runID int64) error {
+// MarkSynced stamps synced_at and records the backend's assigned run id
+// after a successful upload, so PendingRuns won't return this run again.
+// backendRunID is the server's own uuid from its /ingest response -- it is
+// not the same value as this run's local uuid, since the backend assigns
+// its own id rather than accepting a client-supplied one.
+func (s *Store) MarkSynced(runID int64, backendRunID string) error {
 	res, err := s.db.Exec(
-		`UPDATE runs SET synced_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?;`,
-		runID)
+		`UPDATE runs SET synced_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+		                 backend_run_id = ? WHERE id = ?;`,
+		backendRunID, runID)
 	if err != nil {
 		return fmt.Errorf("store: marking run %d synced: %w", runID, err)
 	}
