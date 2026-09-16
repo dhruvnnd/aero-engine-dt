@@ -1,0 +1,42 @@
+Go tool that uploads completed runs from a local run_log database to the server.
+One-shot: run it, it syncs whatever's pending, it exits
+
+Build:
+
+  cd sync
+  go build -o aero-sync .
+
+Usage:
+
+  aero-sync -db PATH -server URL [-timeout DURATION]
+  aero-sync -db PATH -dry-run
+
+  -db PATH        run_log database to sync from (default: runs/twin_sim.db)
+  -server URL     backend base URL, e.g. https://host:port (required
+                     unless -dry-run)
+  -timeout DUR    per-upload HTTP timeout (default: 60s)
+  -dry-run        list pending runs and sample counts, no upload, no
+                     network
+
+Exit codes: 0 = synced (or nothing was pending), 1 = at least one run
+failed or was ambiguous, 2 = usage error. Meant for a scheduler to alert
+on non-zero.
+
+Each run is uploaded once as a Parquet file (internal/parquetenc) plus a
+session_name form field set to the run's local uuid -- the backend
+assigns its own run_id and has no client-supplied idempotency key, so a
+run whose outcome is ambiguous (network failure, timeout) is left
+pending rather than retried automatically. Check the backend's /runs for
+a matching session_name before resyncing one of those by hand.
+
+Packages (internal/):
+
+  store        reads run_log.db: pending runs, their samples, marks synced
+  parquetenc   encodes a run's samples into the backend's Parquet schema
+  backend      HTTP client for POST /ingest
+  syncer       wires the above together, one Result per run
+
+encode.go / view.go are go:build ignore dev tools for inspecting what a
+run looks like once encoded (run with `go run encode.go` / `go run
+view.go`) -- not part of the built binary. Their *.parquet output is
+gitignored.
