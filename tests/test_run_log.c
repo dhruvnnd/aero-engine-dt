@@ -48,8 +48,50 @@ static void test_open_creates_schema(void) {
   CHECK(query_count(log.db,
                     "SELECT count(*) FROM pragma_table_info('samples') "
                     "WHERE name='cht_c_1';") == 1);
+  CHECK(query_count(log.db,
+                    "SELECT count(*) FROM pragma_table_info('runs') "
+                    "WHERE name='backend_run_id';") == 1);
 
   run_log_close(&log);
+}
+
+/* A .db file created before backend_run_id existed (CREATE TABLE IF NOT
+ * EXISTS is a no-op against it) must still gain the column on reopen,
+ * rather than silently staying on the old shape. */
+static void test_reopen_migrates_missing_backend_run_id_column(void) {
+  remove(TMP_PATH);
+
+  sqlite3 *raw = NULL;
+  CHECK(sqlite3_open(TMP_PATH, &raw) == SQLITE_OK);
+  CHECK(sqlite3_exec(raw,
+                     "CREATE TABLE runs ("
+                     "  id INTEGER PRIMARY KEY,"
+                     "  uuid TEXT NOT NULL UNIQUE,"
+                     "  source TEXT NOT NULL,"
+                     "  profile TEXT,"
+                     "  dt REAL,"
+                     "  duration_s REAL,"
+                     "  load_nm REAL,"
+                     "  seed INTEGER,"
+                     "  engine_spec TEXT,"
+                     "  with_sensor INTEGER NOT NULL DEFAULT 0,"
+                     "  started_at TEXT NOT NULL DEFAULT "
+                     "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),"
+                     "  ended_at TEXT,"
+                     "  status TEXT NOT NULL DEFAULT 'running',"
+                     "  synced_at TEXT"
+                     ");",
+                     NULL, NULL, NULL) == SQLITE_OK);
+  sqlite3_close(raw);
+
+  RunLog log;
+  CHECK(run_log_open(&log, TMP_PATH) == RUN_LOG_OK);
+  CHECK(query_count(log.db,
+                    "SELECT count(*) FROM pragma_table_info('runs') "
+                    "WHERE name='backend_run_id';") == 1);
+  run_log_close(&log);
+
+  remove(TMP_PATH);
 }
 
 static void test_begin_write_end_round_trip(void) {
@@ -175,6 +217,8 @@ static const TestCase CASES[] = {
     {"run_log.reopen_appends_not_overwrites",
      test_reopen_appends_not_overwrites},
     {"run_log.uuids_are_unique", test_uuids_are_unique},
+    {"run_log.reopen_migrates_missing_backend_run_id_column",
+     test_reopen_migrates_missing_backend_run_id_column},
 };
 
 RUN_TESTS(CASES)
