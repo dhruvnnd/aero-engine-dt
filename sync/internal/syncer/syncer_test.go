@@ -3,6 +3,7 @@ package syncer
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -69,14 +70,21 @@ func newFixtureStore(t *testing.T) (*store.Store, *sql.DB) {
 	return s, seed
 }
 
-func insertCompletedRun(t *testing.T, db *sql.DB, uuid string) int64 {
+// sessionNameFor is the session_name insertCompletedRun's fixture row
+// should produce for the given seed, given the fixed profile/started_at
+// insertCompletedRun otherwise inserts.
+func sessionNameFor(seed int) string {
+	return fmt.Sprintf("idle-2026-01-01T000000Z-seed%d", seed)
+}
+
+func insertCompletedRun(t *testing.T, db *sql.DB, uuid string, seed int) int64 {
 	t.Helper()
 	res, err := db.Exec(`
 		INSERT INTO runs (uuid, source, profile, dt, duration_s, load_nm, seed,
-		                   engine_spec, with_sensor, ended_at, status)
-		VALUES (?, 'test', 'idle', 0.02, 1.0, 8.0, 1, 'default', 0,
-		        '2026-01-01T00:00:00Z', 'completed');
-	`, uuid)
+		                   engine_spec, with_sensor, started_at, ended_at, status)
+		VALUES (?, 'test', 'idle', 0.02, 1.0, 8.0, ?, 'default', 0,
+		        '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'completed');
+	`, uuid, seed)
 	if err != nil {
 		t.Fatalf("inserting run: %v", err)
 	}
@@ -115,7 +123,7 @@ func insertCompletedRun(t *testing.T, db *sql.DB, uuid string) int64 {
 
 func TestSyncPending_Success_MarksRunSynced(t *testing.T) {
 	s, db := newFixtureStore(t)
-	runID := insertCompletedRun(t, db, "local-uuid-1")
+	runID := insertCompletedRun(t, db, "local-uuid-1", 1)
 
 	var gotSessionName string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -143,8 +151,8 @@ func TestSyncPending_Success_MarksRunSynced(t *testing.T) {
 	if r.RunID != runID || r.UUID != "local-uuid-1" {
 		t.Errorf("Result = %+v, want RunID=%d UUID=local-uuid-1", r, runID)
 	}
-	if gotSessionName != "local-uuid-1" {
-		t.Errorf("server saw session_name=%q, want the run's local uuid", gotSessionName)
+	if want := sessionNameFor(1); gotSessionName != want {
+		t.Errorf("server saw session_name=%q, want %q", gotSessionName, want)
 	}
 
 	pending, err := s.PendingRuns()
@@ -167,7 +175,7 @@ func TestSyncPending_Success_MarksRunSynced(t *testing.T) {
 
 func TestSyncPending_CleanRejection_LeavesRunPending(t *testing.T) {
 	s, db := newFixtureStore(t)
-	runID := insertCompletedRun(t, db, "local-uuid-2")
+	runID := insertCompletedRun(t, db, "local-uuid-2", 2)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -192,7 +200,7 @@ func TestSyncPending_CleanRejection_LeavesRunPending(t *testing.T) {
 
 func TestSyncPending_AmbiguousFailure_LeavesRunPendingAndIsMarkedAmbiguous(t *testing.T) {
 	s, db := newFixtureStore(t)
-	runID := insertCompletedRun(t, db, "local-uuid-3")
+	runID := insertCompletedRun(t, db, "local-uuid-3", 3)
 
 	// A closed server guarantees a connection-level failure, never a real
 	// HTTP response -- the "outcome unknown" case.
@@ -216,19 +224,20 @@ func TestSyncPending_AmbiguousFailure_LeavesRunPendingAndIsMarkedAmbiguous(t *te
 
 func TestSyncPending_OneFailureDoesNotBlockOtherRuns(t *testing.T) {
 	s, db := newFixtureStore(t)
-	failID := insertCompletedRun(t, db, "local-uuid-fail")
-	okID := insertCompletedRun(t, db, "local-uuid-ok")
+	failID := insertCompletedRun(t, db, "local-uuid-fail", 4)
+	okID := insertCompletedRun(t, db, "local-uuid-ok", 5)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseMultipartForm(1 << 20)
-		if r.FormValue("session_name") == "local-uuid-fail" {
+		if r.FormValue("session_name") == sessionNameFor(4) {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			w.Write([]byte(`{"detail":"bad"}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"run_id":"backend-uuid-ok","session_name":"local-uuid-ok","rows_ingested":1,"archived":true}`))
+		w.Write([]byte(`{"run_id":"backend-uuid-ok","session_name":"` + sessionNameFor(5) +
+			`","rows_ingested":1,"archived":true}`))
 	}))
 	defer srv.Close()
 

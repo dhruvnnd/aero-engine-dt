@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"aero-engine-dt/sync/internal/backend"
 	"aero-engine-dt/sync/internal/parquetenc"
@@ -36,10 +37,20 @@ func (s Status) String() string {
 
 // Result is one run's sync outcome.
 type Result struct {
-	RunID  int64
-	UUID   string
-	Status Status
-	Err    error // nil only when Status == StatusSynced
+	RunID       int64
+	UUID        string
+	SessionName string
+	Status      Status
+	Err         error // nil only when Status == StatusSynced
+}
+
+func sessionName(r store.Run) string {
+	profile := r.EngineSpec
+	if r.Profile.Valid && r.Profile.String != "" {
+		profile = r.Profile.String
+	}
+	started := strings.NewReplacer(":", "", ".", "").Replace(r.StartedAt)
+	return fmt.Sprintf("%s-%s-seed%d", profile, started, r.Seed)
 }
 
 type Syncer struct {
@@ -67,7 +78,8 @@ func (s *Syncer) SyncPending(ctx context.Context) ([]Result, error) {
 }
 
 func (s *Syncer) syncOne(ctx context.Context, r store.Run) Result {
-	res := Result{RunID: r.ID, UUID: r.UUID}
+	name := sessionName(r)
+	res := Result{RunID: r.ID, UUID: r.UUID, SessionName: name}
 
 	samples, err := s.store.Samples(r.ID)
 	if err != nil {
@@ -83,14 +95,14 @@ func (s *Syncer) syncOne(ctx context.Context, r store.Run) Result {
 		return res
 	}
 
-	resp, err := s.backend.Ingest(ctx, r.UUID, data)
+	resp, err := s.backend.Ingest(ctx, name, data)
 	if err != nil {
 		if errors.Is(err, backend.ErrAmbiguousOutcome) {
 			res.Status = StatusAmbiguous
 		} else {
 			res.Status = StatusFailed
 		}
-		res.Err = fmt.Errorf("uploading run %d (uuid=%s): %w", r.ID, r.UUID, err)
+		res.Err = fmt.Errorf("uploading run %d (session_name=%s): %w", r.ID, name, err)
 		return res
 	}
 

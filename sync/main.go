@@ -85,16 +85,16 @@ func runSync(s *store.Store, serverURL string, timeout time.Duration) int {
 	for _, r := range results {
 		switch r.Status {
 		case syncer.StatusSynced:
-			fmt.Printf("run %d (uuid=%s): synced\n", r.RunID, r.UUID)
+			fmt.Printf("run %d (session_name=%s): synced\n", r.RunID, r.SessionName)
 		case syncer.StatusFailed:
 			failed++
-			fmt.Fprintf(os.Stderr, "run %d (uuid=%s): FAILED: %v\n", r.RunID, r.UUID, r.Err)
+			fmt.Fprintf(os.Stderr, "run %d (session_name=%s): FAILED: %v\n", r.RunID, r.SessionName, r.Err)
 		case syncer.StatusAmbiguous:
 			ambiguous++
 			fmt.Fprintf(os.Stderr,
-				"run %d (uuid=%s): AMBIGUOUS -- outcome unknown, left pending; "+
+				"run %d (session_name=%s): AMBIGUOUS -- outcome unknown, left pending; "+
 					"check %s/runs for a matching session_name before assuming it needs a retry: %v\n",
-				r.RunID, r.UUID, serverURL, r.Err)
+				r.RunID, r.SessionName, serverURL, r.Err)
 		}
 	}
 

@@ -23,11 +23,13 @@ failed or was ambiguous, 2 = usage error. Meant for a scheduler to alert
 on non-zero.
 
 Each run is uploaded once as a Parquet file (internal/parquetenc) plus a
-session_name form field set to the run's local uuid -- the backend
-assigns its own run_id and has no client-supplied idempotency key, so a
-run whose outcome is ambiguous (network failure, timeout) is left
-pending rather than retried automatically. Check the backend's /runs for
-a matching session_name before resyncing one of those by hand.
+session_name form field derived from the run's profile, started_at, and
+seed (not its local uuid, which isn't useful for finding a run by eye on
+the backend) -- the backend assigns its own run_id and has no
+client-supplied idempotency key, so a run whose outcome is ambiguous
+(network failure, timeout) is left pending rather than retried
+automatically. Check the backend's /runs for a matching session_name
+before resyncing one of those by hand.
 
 Packages (internal/):
 
