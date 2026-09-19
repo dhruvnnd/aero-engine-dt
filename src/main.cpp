@@ -5,6 +5,10 @@
 
 #include <string.h>
 
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlrenderer3.h"
+
 #include "model/state.h"
 #include "model/sync.h"
 #include "physics/engine_model.h"
@@ -89,6 +93,19 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     return SDL_APP_FAILURE;
   }
 
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO &io = ImGui::GetIO();
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+#ifdef IMGUI_HAS_DOCK
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+#endif
+  io.IniFilename = "aero_engine_dt_imgui.ini";
+  ImGui::StyleColorsDark();
+  ImGui_ImplSDL3_InitForSDLRenderer(app->window_ctx.window,
+                                    app->window_ctx.renderer);
+  ImGui_ImplSDLRenderer3_Init(app->window_ctx.renderer);
+
   /* Optional -- the sim runs fine without it, so a failure here is not fatal.
    * Created hidden; the G key brings it up on demand. */
   if (sdl_window_init(&app->gamepad_ctx, "aero engine dt | gamepad", GP_WIN_W,
@@ -165,6 +182,18 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   AppState *app = (AppState *)appstate;
   if (event->type == SDL_EVENT_QUIT) {
     return SDL_APP_SUCCESS;
+  }
+
+  ImGui_ImplSDL3_ProcessEvent(event);
+  const ImGuiIO &io = ImGui::GetIO();
+  const bool is_key =
+      event->type == SDL_EVENT_KEY_DOWN || event->type == SDL_EVENT_KEY_UP;
+  const bool is_mouse = event->type == SDL_EVENT_MOUSE_MOTION ||
+                        event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                        event->type == SDL_EVENT_MOUSE_BUTTON_UP ||
+                        event->type == SDL_EVENT_MOUSE_WHEEL;
+  if ((is_key && io.WantCaptureKeyboard) || (is_mouse && io.WantCaptureMouse)) {
+    return SDL_APP_CONTINUE;
   }
 
   /* Closing a companion panel just dismisses it; closing the main window (or
@@ -334,6 +363,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   const ModelState *shown = app->sensor_mode ? &app->display : &app->state;
 
+  ImGui_ImplSDLRenderer3_NewFrame();
+  ImGui_ImplSDL3_NewFrame();
+  ImGui::NewFrame();
+  ImGui::ShowDemoWindow();
+  ImGui::Render();
+
   SDL_SetRenderDrawColor(renderer, 10, 14, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
@@ -341,6 +376,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                  app->sync.engine_config.num_cylinders, app->input.throttle,
                  app->sync.sim_time_s, fps, app->sensor_mode);
 
+  /* disable logical presentation just for imgui */
+  SDL_SetRenderLogicalPresentation(renderer, 0, 0,
+                                   SDL_LOGICAL_PRESENTATION_DISABLED);
+  ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+  SDL_SetRenderLogicalPresentation(renderer, WIN_W, WIN_H,
+                                   SDL_LOGICAL_PRESENTATION_LETTERBOX);
   SDL_RenderPresent(renderer);
 
   if (app->gamepad_ctx.window && app->gamepad_win_shown) {
@@ -366,6 +407,9 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   (void)result;
   AppState *app = (AppState *)appstate;
   sdl_input_shutdown(&app->input);
+  ImGui_ImplSDLRenderer3_Shutdown();
+  ImGui_ImplSDL3_Shutdown();
+  ImGui::DestroyContext();
   if (app->gamepad_ctx.window) {
     sdl_window_shutdown(&app->gamepad_ctx);
   }
