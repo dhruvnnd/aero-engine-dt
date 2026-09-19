@@ -1,6 +1,10 @@
 #ifndef PHYSICS_CYLINDER_H
 #define PHYSICS_CYLINDER_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "physics/thermal.h"
 
 /* Per-cylinder overlay on the lumped engine model. */
@@ -58,5 +62,9 @@ double cylinder_lambda(const CylinderConfig *c);
 
 /* Fraction of cycles that fail to fire outright */
 double misfire_fraction(double lambda);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_CYLINDER_H */

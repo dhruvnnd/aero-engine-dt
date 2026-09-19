@@ -1,6 +1,10 @@
 #ifndef UI_UI_DRAW_H
 #define UI_UI_DRAW_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL3/SDL.h>
 
 #include "ui/ui_layout.h"
@@ -48,5 +52,9 @@ void ui_text_right(SDL_Renderer *r, float x_right, float y, SDL_Color c,
 void ui_text_center(SDL_Renderer *r, float x_center, float y, SDL_Color c,
                     SDL_PRINTF_FORMAT_STRING const char *fmt, ...)
     SDL_PRINTF_VARARG_FUNC(5);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* UI_UI_DRAW_H */

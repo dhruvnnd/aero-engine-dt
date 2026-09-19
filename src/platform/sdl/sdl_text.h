@@ -1,6 +1,10 @@
 #ifndef PLATFORM_SDL_SDL_TEXT_H
 #define PLATFORM_SDL_SDL_TEXT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL3/SDL.h>
 
 #define SDL_TEXT_MARGIN 8.0f
@@ -34,5 +38,9 @@ void sdl_text_draw(SDL_Renderer *renderer, SdlTextAnchor anchor, int line,
 void sdl_text_draw_at(SDL_Renderer *renderer, float x, float y, SDL_Color color,
                       SDL_PRINTF_FORMAT_STRING const char *fmt, ...)
     SDL_PRINTF_VARARG_FUNC(5);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // !PLATFORM_SDL_SDL_TEXT_H

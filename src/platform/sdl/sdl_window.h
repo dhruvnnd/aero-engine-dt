@@ -1,6 +1,10 @@
 #ifndef PLATFORM_SDL_SDL_WINDOWS_H
 #define PLATFORM_SDL_SDL_WINDOWS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL3/SDL.h>
 
 typedef struct {
@@ -12,5 +16,9 @@ bool sdl_window_init(SdlWindowContext *ctx, const char *title, int width,
                      int height);
 
 void sdl_window_shutdown(SdlWindowContext *ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // !PLATFORM_SDL_SDL_WINDOWS_H

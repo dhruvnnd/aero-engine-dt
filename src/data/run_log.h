@@ -1,6 +1,10 @@
 #ifndef DATA_RUN_LOG_H
 #define DATA_RUN_LOG_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 #include "model/state.h"
@@ -65,5 +69,9 @@ void run_log_end_run(RunLog *log, int64_t run_id, const char *status);
 
 /* Finalizes prepared statements and closes the database */
 void run_log_close(RunLog *log);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* DATA_RUN_LOG_H */

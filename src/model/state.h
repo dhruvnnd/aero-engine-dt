@@ -1,6 +1,10 @@
 #ifndef MODEL_STATE_H
 #define MODEL_STATE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "physics/cylinder.h"
 #include "physics/electrical.h"
 #include "physics/engine_model.h"
@@ -32,5 +36,9 @@ void model_state_init(ModelState *state, const EngineConfig *engine_config,
 
 /* Recomputes the cached derived readouts (rpm, torque_nm) from engine. */
 void model_state_refresh_derived(ModelState *state);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* MODEL_STATE_H */

@@ -1,6 +1,10 @@
 #ifndef PHYSICS_FUEL_H
 #define PHYSICS_FUEL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "physics/cylinder.h" /* CylinderConfig */
 
 /* Engine air / fuel mass balance */
@@ -29,5 +33,9 @@ void fuel_state_init(FuelState *state);
 void fuel_step(FuelState *state, const FuelConfig *config,
                const CylinderConfig *cyl, int num_cylinders, double map_kpa,
                double rpm, double intake_temp_c);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_FUEL_H */

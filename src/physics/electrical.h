@@ -1,6 +1,10 @@
 #ifndef PHYSICS_ELECTRICAL_H
 #define PHYSICS_ELECTRICAL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
   double bus_nominal_v; /* regulated bus voltage when the alternator carries the
                            load */
@@ -32,5 +36,9 @@ void elec_state_init(ElecState *state);
 /* Refreshes the electrical state from the current crank speed. */
 void elec_step(ElecState *state, const ElecConfig *config, double rpm,
                int starter_active, double dt);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_ELECTRICAL_H */

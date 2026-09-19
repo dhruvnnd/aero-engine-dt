@@ -1,6 +1,10 @@
 #ifndef PHYSICS_ENGINE_SPEC_IO_H
 #define PHYSICS_ENGINE_SPEC_IO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "physics/engine_model.h"
 
 typedef enum {
@@ -24,5 +28,9 @@ EngineSpecResult engine_spec_load(const char *path, EngineConfig *out);
  * Returns 0 on success, -1 if `path` couldn't be
  * opened for writing (diagnostic printed to stderr). */
 int engine_spec_save(const char *path, const EngineConfig *cfg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_ENGINE_SPEC_IO_H */

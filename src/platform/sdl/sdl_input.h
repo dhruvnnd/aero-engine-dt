@@ -1,6 +1,10 @@
 #ifndef PLATFORM_SDL_SDL_INPUT_H
 #define PLATFORM_SDL_SDL_INPUT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL3/SDL.h>
 
 typedef struct {
@@ -44,5 +48,9 @@ void sdl_input_handle_event(SdlInputState *input, const SDL_Event *event);
  * Call once per frame. SDL_AppIterate runs after event delivery, so both
  * input snapshots are already current there. */
 void sdl_input_update(SdlInputState *input, double dt);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PLATFORM_SDL_SDL_INPUT_H */

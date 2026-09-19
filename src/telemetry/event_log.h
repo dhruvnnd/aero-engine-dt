@@ -1,6 +1,10 @@
 #ifndef TELEMETRY_EVENT_LOG_H
 #define TELEMETRY_EVENT_LOG_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Fixed-capacity ring buffer of application/sim events
  */
@@ -42,5 +46,9 @@ int event_log_count(const EventLog *log);
 /* Record by age index: 0 = oldest retained, count-1 = newest. NULL if out of
  * range. */
 const EventRecord *event_log_at(const EventLog *log, int i);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* TELEMETRY_EVENT_LOG_H */

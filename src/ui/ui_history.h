@@ -1,6 +1,10 @@
 #ifndef UI_UI_HISTORY_H
 #define UI_UI_HISTORY_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Fixed-capacity ring buffer of doubles for trend strips. No allocation: the
  * caller embeds a UiHistory (with a chosen CAP) wherever the sample series
@@ -43,5 +47,9 @@ double ui_history_last(const UiHistory *h);
 double ui_history_min(const UiHistory *h);
 /* Max over the live samples (0.0 if empty). */
 double ui_history_max(const UiHistory *h);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* UI_UI_HISTORY_H */

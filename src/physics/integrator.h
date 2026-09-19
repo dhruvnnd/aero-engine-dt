@@ -1,6 +1,10 @@
 #ifndef PHYSICS_INTEGRATOR_H
 #define PHYSICS_INTEGRATOR_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Upper bound on the number of scalars in a single state vector used with
  * the stepper below. Keeps it allocation-free (fixed stack buffers) at the
  * cost of a compile-time cap -- generous for any one submodel (engine,
@@ -21,5 +25,9 @@ typedef void (*IntegratorDerivFn)(const double *state, double *dstate, double t,
  * `state` in place with the result at t + dt. */
 void integrator_rk4_step(double *state, int n, double t, double dt,
                          IntegratorDerivFn deriv, void *user_data);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_INTEGRATOR_H */

@@ -1,6 +1,10 @@
 #ifndef PHYSICS_COMBUSTION_H
 #define PHYSICS_COMBUSTION_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 double combustion_indicated_torque_nm(double map_kpa, double omega_rad_s);
 
 /* Indicated power implied by the current operating point (torque * omega). */
@@ -15,5 +19,9 @@ double combustion_waste_heat_w(double map_kpa, double omega_rad_s);
  * 0 when the crank is stopped. Drives the (saturating) CHT/EGT targets so
  * gas/metal temperatures don't scale without bound with absolute power. */
 double combustion_load_fraction(double map_kpa, double omega_rad_s);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_COMBUSTION_H */

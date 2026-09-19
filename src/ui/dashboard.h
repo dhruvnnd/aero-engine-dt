@@ -1,6 +1,10 @@
 #ifndef UI_DASHBOARD_H
 #define UI_DASHBOARD_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL3/SDL.h>
 
 #include "model/state.h"
@@ -48,5 +52,9 @@ void dashboard_check_faults(Dashboard *d, EventLog *log, const ModelState *s,
 void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
                     const ModelState *s, int num_cyl, double throttle,
                     double sim_time_s, float fps, int sensor_mode);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* UI_DASHBOARD_H */
