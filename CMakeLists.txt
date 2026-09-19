@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
-project(aero_engine_dt C)
+project(aero_engine_dt C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -103,19 +105,41 @@ else()
   target_link_libraries(engine_core INTERFACE sqlite3)
 endif()
 
-# ---------------------------------------------------------------------------
-# aero_engine_dt: platform/sdl + ui + main.c. Only place SDL3 is linked.
-# ---------------------------------------------------------------------------
+# imgui: vendored Dear ImGui (C++) + its SDL3 / SDL_Renderer3 backends.
+# Static lib, only linked into the app target
+set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/third_party/imgui")
+
+if(NOT EXISTS "${IMGUI_DIR}/imgui.cpp")
+  message(FATAL_ERROR
+    "Dear ImGui not found at ${IMGUI_DIR}. Clone https://github.com/ocornut/imgui "
+    "into third_party/imgui (see docs).")
+endif()
+
+add_library(imgui STATIC
+  "${IMGUI_DIR}/imgui.cpp"
+  "${IMGUI_DIR}/imgui_draw.cpp"
+  "${IMGUI_DIR}/imgui_tables.cpp"
+  "${IMGUI_DIR}/imgui_widgets.cpp"
+  "${IMGUI_DIR}/imgui_demo.cpp"
+  "${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp"
+  "${IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp"
+)
+target_include_directories(imgui PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/backends")
+target_link_libraries(imgui PUBLIC SDL3::SDL3)
+target_compile_options(imgui PRIVATE -O2)
+
+# aero_engine_dt: platform/sdl + ui (C) + main.cpp (C++ app shell hosting
+# ImGui)
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/src/platform/*.c"
   "${CMAKE_SOURCE_DIR}/src/ui/*.c"
 )
-list(APPEND APP_SOURCES "${CMAKE_SOURCE_DIR}/src/main.c")
+list(APPEND APP_SOURCES "${CMAKE_SOURCE_DIR}/src/main.cpp")
 
 add_executable(aero_engine_dt ${APP_SOURCES})
 
 target_include_directories(aero_engine_dt PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(aero_engine_dt PRIVATE engine_core SDL3::SDL3)
+target_link_libraries(aero_engine_dt PRIVATE engine_core imgui SDL3::SDL3)
 
 target_compile_options(aero_engine_dt PRIVATE
   -Wall -Wextra
