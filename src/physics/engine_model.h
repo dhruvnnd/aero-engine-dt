@@ -1,6 +1,10 @@
 #ifndef PHYSICS_ENGINE_MODEL_H
 #define PHYSICS_ENGINE_MODEL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Minimal lumped-parameter model of a piston engine's rotating and intake
  * dynamics: crank angular velocity and manifold pressure, both carried as
  * ODE state. Indicated torque is the sum of per-cylinder contributions
@@ -88,5 +92,9 @@ double engine_model_torque_nm(const EngineState *state);
  * silently). Returns the number of issues found; 0 means the config is
  * clean. */
 int engine_config_validate(const EngineConfig *cfg, FILE *out);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_ENGINE_MODEL_H */

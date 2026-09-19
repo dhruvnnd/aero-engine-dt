@@ -1,6 +1,10 @@
 #ifndef MODEL_SYNC_H
 #define MODEL_SYNC_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "model/state.h"
 #include "physics/cylinder.h"
 #include "physics/electrical.h"
@@ -25,5 +29,9 @@ void model_sync_init(ModelSync *sync);
 
 void model_sync_step(ModelSync *sync, ModelState *state,
                      const EngineInput *input, const EnvInput *env, double dt);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* MODEL_SYNC_H */

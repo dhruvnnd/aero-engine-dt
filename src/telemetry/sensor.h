@@ -1,6 +1,10 @@
 #ifndef TELEMETRY_SENSOR_H
 #define TELEMETRY_SENSOR_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -72,5 +76,9 @@ SensorReading sensor_read(Sensor *sensor, const ModelState *truth);
  * as-is. */
 void sensor_read_state(Sensor *sensor, const ModelState *truth,
                        ModelState *out);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* TELEMETRY_SENSOR_H */

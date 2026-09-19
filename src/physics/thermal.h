@@ -1,6 +1,10 @@
 #ifndef PHYSICS_THERMAL_H
 #define PHYSICS_THERMAL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
   double cht_c;      /* cylinder head temperature */
   double egt_c;      /* exhaust gas temperature */
@@ -42,5 +46,9 @@ void thermal_init(ThermalState *state, double ambient_temp_c);
 void thermal_step(ThermalState *state, const ThermalConfig *config,
                   double waste_heat_w, double load_frac, double cool_index,
                   double ambient_temp_c, double t, double dt);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_THERMAL_H */

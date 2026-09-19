@@ -1,6 +1,10 @@
 #ifndef UI_UI_WIDGETS_H
 #define UI_UI_WIDGETS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <SDL3/SDL.h>
 
 #include "ui/ui_history.h"
@@ -86,5 +90,9 @@ void ui_bar_series(SDL_Renderer *r, UiRect bounds, const UiTheme *th,
                    const char *label, const double *vals,
                    const char *const *tags, int n, const char *unit,
                    int precision, UiRange range);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* UI_UI_WIDGETS_H */

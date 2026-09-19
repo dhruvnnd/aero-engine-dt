@@ -1,6 +1,10 @@
 #ifndef PHYSICS_LUBRICATION_H
 #define PHYSICS_LUBRICATION_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Oil pressure model.
  * The pump is crank-driven, so rail pressure follows RPM essentially instantly
  */
@@ -27,5 +31,9 @@ void lube_state_init(LubeState *state);
 /* Refreshes oil pressure from crank speed and oil temperature. */
 void lube_step(LubeState *state, const LubeConfig *config, double rpm,
                double oil_temp_c);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_LUBRICATION_H */

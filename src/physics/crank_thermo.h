@@ -1,6 +1,10 @@
 #ifndef PHYSICS_CRANK_THERMO_H
 #define PHYSICS_CRANK_THERMO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
   double bore_m;
   double stroke_m;
@@ -101,5 +105,9 @@ double cylinder_charge_energy_j_with_vivc(double map_kpa, double intake_temp_c,
                                           const EngineGeometry *geom,
                                           double afr_stoich, double lambda,
                                           double misfire_frac);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_CRANK_THERMO_H */

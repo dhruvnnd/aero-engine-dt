@@ -1,6 +1,10 @@
 #ifndef PHYSICS_ENVIRONMENT_H
 #define PHYSICS_ENVIRONMENT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * International Standard Atmosphere (troposphere model, valid roughly
  * 0-11,000m / 0-36,000 ft)
@@ -44,5 +48,9 @@ double environment_density_altitude_m(double density_kg_m3);
  * 1 / sqrt(this) -- thin/slow cooling air runs the engine hotter. */
 double environment_cool_index(double density_kg_m3, double airspeed_ms,
                               double rpm);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PHYSICS_ENVIRONMENT_H */

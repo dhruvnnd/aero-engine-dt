@@ -1,6 +1,10 @@
 #ifndef UI_UI_LAYOUT_H
 #define UI_UI_LAYOUT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
   float x, y, w, h;
 } UiRect;
@@ -54,5 +58,9 @@ UiRect ui_stack_row(UiStack *s, float height);
 
 /* Remaining unspent area below the cursor. */
 UiRect ui_stack_rest(const UiStack *s);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* UI_UI_LAYOUT_H */
