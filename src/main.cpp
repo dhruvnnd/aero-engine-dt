@@ -373,6 +373,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   ImGui_ImplSDLRenderer3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
+#ifdef IMGUI_HAS_DOCK
+  ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
+                               ImGuiDockNodeFlags_PassthruCentralNode);
+#endif
   ImGui::ShowDemoWindow();
   ImGui::Render();
 
