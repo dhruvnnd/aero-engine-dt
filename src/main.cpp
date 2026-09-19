@@ -26,6 +26,9 @@
 #define WIN_W 1000
 #define WIN_H 680
 
+/* ImGui size multiplier */
+#define UI_ZOOM 1.2f
+
 /* Companion window that shows the gamepad bindings + live input state. */
 #define GP_WIN_W 540
 #define GP_WIN_H 860
@@ -102,6 +105,10 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 #endif
   io.IniFilename = "aero_engine_dt_imgui.ini";
   ImGui::StyleColorsDark();
+  const float ui_scale =
+      SDL_GetWindowDisplayScale(app->window_ctx.window) * UI_ZOOM;
+  ImGui::GetStyle().ScaleAllSizes(ui_scale);
+  ImGui::GetStyle().FontScaleMain = ui_scale;
   ImGui_ImplSDL3_InitForSDLRenderer(app->window_ctx.window,
                                     app->window_ctx.renderer);
   ImGui_ImplSDLRenderer3_Init(app->window_ctx.renderer);
