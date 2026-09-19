@@ -13,3 +13,4 @@ tools/__pycache__/*
 third_party/*
 sync/sync
 *.parquet
+aero_engine_dt_imgui.ini
