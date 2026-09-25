@@ -10,6 +10,7 @@
 #define PANEL_ENVIRONMENT "Environment"
 #define PANEL_CYLINDERS "Cylinders"
 #define PANEL_TRENDS "Trends"
+#define PANEL_CYL_TRENDS "Cylinder Trends"
 #define PANEL_EVENT_LOG "Event Log"
 #define PANEL_GAMEPAD "Gamepad / Input Map"
 

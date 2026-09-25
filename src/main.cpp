@@ -20,11 +20,13 @@
 #include "platform/sdl/sdl_time.h"
 #include "platform/sdl/sdl_window.h"
 #include "telemetry/annunciator.h"
+#include "telemetry/cyl_trends.h"
 #include "telemetry/event_log.h"
 #include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
 #include "telemetry/trends.h"
 #include "ui/alarm_strip.h"
+#include "ui/cyl_trends_panel.h"
 #include "ui/event_log_panel.h"
 #include "ui/faults_panel.h"
 #include "ui/gamepad_panel.h"
@@ -78,6 +80,7 @@ typedef struct {
   bool logged_paused;   /* clock state last written to the event log */
   int logged_speed_idx;
   Trends trends;
+  CylTrends cyl_trends;
   EventLog events;
 
   double ambient_c;
@@ -204,6 +207,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   app->logged_paused = app->clock.paused;
   app->logged_speed_idx = app->clock.speed_idx;
   trends_init(&app->trends);
+  cyl_trends_init(&app->cyl_trends);
   app->sample_accum_s = 0.0;
 
   return SDL_APP_CONTINUE;
@@ -382,6 +386,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     sensor_read_state(&app->sensor, &app->state, &app->display);
     const ModelState *sampled = app->sensor_mode ? &app->display : &app->state;
     trends_sample(&app->trends, sampled);
+    cyl_trends_sample(&app->cyl_trends, sampled,
+                      app->sync.engine_config.num_cylinders);
     fault_monitor_check(&app->faults, &app->events, sampled,
                         app->sync.sim_time_s);
     annunciator_update(&app->ann, sampled);
@@ -439,6 +445,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("Environment", NULL, &app->panels.environment);
       ImGui::MenuItem("Cylinders", NULL, &app->panels.cylinders);
       ImGui::MenuItem("Trends", NULL, &app->panels.trends);
+      ImGui::MenuItem("Cylinder Trends", NULL, &app->panels.cyl_trends);
       ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
       ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
       ImGui::Separator();
@@ -477,6 +484,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   }
   if (app->panels.trends) {
     trends_panel_draw(&app->panels.trends, &app->trends, SAMPLE_PERIOD_S);
+  }
+  if (app->panels.cyl_trends) {
+    cyl_trends_panel_draw(&app->panels.cyl_trends, &app->cyl_trends,
+                          app->sync.engine_config.num_cylinders,
+                          SAMPLE_PERIOD_S);
   }
   if (app->panels.event_log) {
     event_log_panel_draw(&app->panels.event_log, &app->events);

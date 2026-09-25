@@ -39,6 +39,7 @@ PanelVisibility layout_visibility(int id) {
   }
   v.alarms = true; /* thin bar along the bottom; closable, movable */
   v.faults = true; /* a tab beside Sim in every layout */
+  v.cyl_trends = true; /* a tab beside Trends / Cylinders */
   return v;
 }
 
@@ -86,7 +87,7 @@ void layout_apply(int id, ImVec2 size) {
     /* big trends on the left; instruments over a tab group on the right */
     ImGuiID right = carve(rest, ImGuiDir_Right, 0.32f);
     ImGuiID right_bottom = carve(right, ImGuiDir_Down, 0.45f);
-    DOCK(rest, PANEL_TRENDS);
+    DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS);
     DOCK(right, PANEL_INSTRUMENTS);
     DOCK(right_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
          PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD);
@@ -98,7 +99,7 @@ void layout_apply(int id, ImVec2 size) {
     ImGuiID cylinders = carve(rest, ImGuiDir_Up, 0.45f);
     ImGuiID environment = carve(rest, ImGuiDir_Up, 0.35f);
     DOCK(left, PANEL_INSTRUMENTS);
-    DOCK(cylinders, PANEL_CYLINDERS);
+    DOCK(cylinders, PANEL_CYLINDERS, PANEL_CYL_TRENDS);
     DOCK(environment, PANEL_ENVIRONMENT);
     DOCK(rest, PANEL_SIM, PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD,
          PANEL_TRENDS);
@@ -110,7 +111,8 @@ void layout_apply(int id, ImVec2 size) {
     ImGuiID right_bottom = carve(right, ImGuiDir_Down, 0.35f);
     ImGuiID left_bottom = carve(rest, ImGuiDir_Down, 0.40f);
     DOCK(rest, PANEL_EVENT_LOG);
-    DOCK(left_bottom, PANEL_INSTRUMENTS, PANEL_CYLINDERS, PANEL_TRENDS);
+    DOCK(left_bottom, PANEL_INSTRUMENTS, PANEL_CYLINDERS, PANEL_TRENDS,
+         PANEL_CYL_TRENDS);
     DOCK(right, PANEL_GAMEPAD);
     DOCK(right_bottom, PANEL_SIM, PANEL_FAULTS, PANEL_ENVIRONMENT);
     break;
@@ -124,7 +126,7 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(left, PANEL_INSTRUMENTS);
     DOCK(left_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
          PANEL_FAULTS);
-    DOCK(rest, PANEL_TRENDS);
+    DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS);
     DOCK(right_bottom, PANEL_EVENT_LOG, PANEL_GAMEPAD);
     break;
   }
