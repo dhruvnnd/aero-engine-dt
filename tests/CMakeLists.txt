@@ -25,6 +25,7 @@ set(ENGINE_CORE_TESTS
   test_cyl_trends
   test_run_recorder
   test_engine_config
+  test_engine_config_fields
   test_history
   test_trends
   test_crank_thermo

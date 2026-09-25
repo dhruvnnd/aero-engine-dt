@@ -1,4 +1,5 @@
 #include "physics/engine_model.h"
+#include "physics/engine_config_fields.h"
 
 #include <math.h>
 
@@ -338,49 +339,26 @@ int engine_config_check(const EngineConfig *cfg,
     }
   }
 
-  if (cfg->inertia_kg_m2 <= 0.0) {
-    ISSUE("inertia_kg_m2 = %g: must be positive", cfg->inertia_kg_m2);
-  }
-  if (cfg->map_tau_s <= 0.0) {
-    ISSUE("map_tau_s = %g: must be positive", cfg->map_tau_s);
-  }
-  if (cfg->friction_coeff_nm_per_rad_s <= 0.0) {
-    ISSUE("friction_coeff_nm_per_rad_s = %g: must be positive",
-          cfg->friction_coeff_nm_per_rad_s);
-  }
-  if (cfg->starter_torque_nm <= 0.0) {
-    ISSUE("starter_torque_nm = %g: must be positive", cfg->starter_torque_nm);
-  }
-  if (cfg->starter_catch_rpm <= 0.0) {
-    ISSUE("starter_catch_rpm = %g: must be positive", cfg->starter_catch_rpm);
+  /* per-parameter ranges come from the field table */
+  for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
+    const ConfigField *f = &ENGINE_CONFIG_FIELDS[i];
+    const double v = *engine_config_field_cptr(cfg, f);
+    if (!engine_config_field_in_range(f, v)) {
+      char m[ENGINE_CONFIG_ISSUE_LEN];
+      engine_config_field_range_message(f, v, m, sizeof m);
+      ISSUE("%s", m);
+    }
   }
 
   const EngineGeometry *g = &cfg->geom;
-  if (g->bore_m <= 0.0 || g->stroke_m <= 0.0) {
-    ISSUE("geom: bore_m/stroke_m must be positive");
-  }
   if (g->conrod_len_m <= g->stroke_m / 2.0) {
     ISSUE("geom: conrod_len_m (%g) must exceed stroke_m/2 (%g) -- "
           "slider-crank geometry can't close otherwise",
           g->conrod_len_m, g->stroke_m / 2.0);
   }
-  if (g->compression_ratio <= 1.0) {
-    ISSUE("geom: compression_ratio must exceed 1.0");
-  }
-  if (g->m_recip_kg <= 0.0) {
-    ISSUE("geom: m_recip_kg must be positive");
-  }
-  if (g->delta_theta_burn_deg <= 0.0) {
-    ISSUE("geom: delta_theta_burn_deg must be positive");
-  }
-  if (g->combustion_efficiency <= 0.0 || g->combustion_efficiency > 1.0) {
-    ISSUE("geom: combustion_efficiency must be in (0,1]");
-  }
-  if (g->evo_deg < 0.0 || g->evo_deg >= 720.0 || g->ivc_deg < 0.0 ||
-      g->ivc_deg >= 720.0 || g->evo_deg >= g->ivc_deg) {
-    ISSUE("geom: evo_deg (%g) and ivc_deg (%g) must both be in [0,720) with "
-          "evo_deg < ivc_deg",
-          g->evo_deg, g->ivc_deg);
+  if (g->evo_deg >= g->ivc_deg) {
+    ISSUE("geom: evo_deg (%g) must be less than ivc_deg (%g)", g->evo_deg,
+          g->ivc_deg);
   }
 #undef ISSUE
   return issues;

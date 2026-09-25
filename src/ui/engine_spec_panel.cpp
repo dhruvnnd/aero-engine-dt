@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "imgui.h"
+#include "physics/engine_config_fields.h"
 #include "ui/panel_names.h"
 
 static const ImVec4 COL_WARNING(1.00f, 0.35f, 0.30f, 1.0f);
@@ -93,37 +94,24 @@ void engine_spec_panel_draw(bool *open, const ModelSync *sync,
     ImGui::EndTable();
   }
 
-  if (ImGui::CollapsingHeader("Dynamics", ImGuiTreeNodeFlags_DefaultOpen) &&
-      begin_table("dynamics")) {
-    row("crank inertia", e.inertia_kg_m2, "kg*m^2");
-    row("MAP time constant", e.map_tau_s, "s");
-    row("friction", e.friction_coeff_nm_per_rad_s, "N*m/(rad/s)");
-    row("starter torque", e.starter_torque_nm, "N*m");
-    row("starter catch speed", e.starter_catch_rpm, "rpm");
-    ImGui::EndTable();
-  }
-
-  if (ImGui::CollapsingHeader("Geometry", ImGuiTreeNodeFlags_DefaultOpen) &&
-      begin_table("geometry")) {
-    row("bore", e.geom.bore_m * 1000.0, "mm");
-    row("stroke", e.geom.stroke_m * 1000.0, "mm");
-    row("conrod length", e.geom.conrod_len_m * 1000.0, "mm");
-    row("compression ratio", e.geom.compression_ratio, ":1");
-    row("exhaust valve opens", e.geom.evo_deg, "deg");
-    row("intake valve closes", e.geom.ivc_deg, "deg");
-    row("reciprocating mass", e.geom.m_recip_kg, "kg/cyl");
-    ImGui::EndTable();
-  }
-
-  if (ImGui::CollapsingHeader("Combustion") && begin_table("combustion")) {
-    row("Wiebe a", e.geom.wiebe_a, "");
-    row("Wiebe m", e.geom.wiebe_m, "");
-    row("burn duration", e.geom.delta_theta_burn_deg, "deg");
-    row("spark base advance", e.geom.spark_base_btdc_deg, "deg BTDC");
-    row("spark rpm gain", e.geom.spark_rpm_gain_deg_per_1000rpm, "deg/1000rpm");
-    row("spark MAP retard", e.geom.spark_map_retard_deg_per_kpa, "deg/kPa");
-    row("combustion efficiency", e.geom.combustion_efficiency, "");
-    ImGui::EndTable();
+  for (int gi = 0; gi < ENGINE_CONFIG_GROUP_COUNT; gi++) {
+    const ConfigGroup &grp = ENGINE_CONFIG_GROUPS[gi];
+    if (!ImGui::CollapsingHeader(
+            grp.name, grp.advanced ? 0 : ImGuiTreeNodeFlags_DefaultOpen)) {
+      continue;
+    }
+    ImGui::PushID(gi);
+    if (begin_table("params")) {
+      for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
+        const ConfigField &f = ENGINE_CONFIG_FIELDS[i];
+        if (f.group == gi) {
+          row(f.label, *engine_config_field_cptr(&e, &f) * f.view_scale,
+              f.view_unit);
+        }
+      }
+      ImGui::EndTable();
+    }
+    ImGui::PopID();
   }
 
   if (ImGui::CollapsingHeader("Derived", ImGuiTreeNodeFlags_DefaultOpen) &&

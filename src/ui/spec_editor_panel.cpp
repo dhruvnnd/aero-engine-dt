@@ -6,72 +6,12 @@
 #include <string.h>
 
 #include "imgui.h"
+#include "physics/engine_config_fields.h"
 #include "physics/engine_spec_io.h"
 #include "ui/panel_names.h"
 
 static const ImVec4 COL_CAUTION(1.00f, 0.75f, 0.20f, 1.0f);
 static const ImVec4 COL_WARNING(1.00f, 0.35f, 0.30f, 1.0f);
-
-/* ---- editable fields --------------------------------------------------- */
-
-struct Field {
-  const char *label; /* with unit */
-  const char *key;   /* spec-file key */
-  int group;
-  double *(*get)(EngineConfig &);
-  double lo, hi;         /* slider extent (typed values are not clamped) */
-  double typ_lo, typ_hi; /* typical range; none when typ_hi <= typ_lo */
-  const char *fmt;
-};
-
-#define GET(expr)                                                              \
-  [](EngineConfig &c) -> double * { return &(expr); }
-
-static const char *const GROUPS[] = {"DYNAMICS", "GEOMETRY", "COMBUSTION"};
-
-/* Typical ranges are the ones documented in engine_spec_io.c. */
-static const Field FIELDS[] = {
-    {"crank inertia (kg*m^2)", "inertia_kg_m2", 0, GET(c.inertia_kg_m2), 0.05,
-     3.0, 0.3, 1.0, "%.3f"},
-    {"MAP time constant (s)", "map_tau_s", 0, GET(c.map_tau_s), 0.02, 1.0, 0.1,
-     0.4, "%.3f"},
-    {"friction (N*m/(rad/s))", "friction_coeff_nm_per_rad_s", 0,
-     GET(c.friction_coeff_nm_per_rad_s), 0.005, 0.5, 0.05, 0.2, "%.3f"},
-    {"starter torque (N*m)", "starter_torque_nm", 0, GET(c.starter_torque_nm),
-     5.0, 100.0, 0.0, 0.0, "%.1f"},
-    {"starter catch (rpm)", "starter_catch_rpm", 0, GET(c.starter_catch_rpm),
-     200.0, 1500.0, 0.0, 0.0, "%.0f"},
-
-    {"bore (m)", "bore_m", 1, GET(c.geom.bore_m), 0.04, 0.14, 0.07, 0.10,
-     "%.4f"},
-    {"stroke (m)", "stroke_m", 1, GET(c.geom.stroke_m), 0.04, 0.14, 0.07, 0.10,
-     "%.4f"},
-    {"conrod length (m)", "conrod_len_m", 1, GET(c.geom.conrod_len_m), 0.08,
-     0.25, 0.12, 0.20, "%.4f"},
-    {"compression ratio", "compression_ratio", 1,
-     GET(c.geom.compression_ratio), 5.0, 15.0, 8.5, 11.0, "%.2f"},
-    {"exhaust valve opens (deg)", "evo_deg", 1, GET(c.geom.evo_deg), 60.0,
-     180.0, 110.0, 150.0, "%.0f"},
-    {"intake valve closes (deg)", "ivc_deg", 1, GET(c.geom.ivc_deg), 500.0,
-     700.0, 570.0, 610.0, "%.0f"},
-    {"reciprocating mass (kg)", "m_recip_kg", 1, GET(c.geom.m_recip_kg), 0.1,
-     1.0, 0.3, 0.6, "%.3f"},
-
-    {"Wiebe a", "wiebe_a", 2, GET(c.geom.wiebe_a), 1.0, 10.0, 3.0, 6.0,
-     "%.2f"},
-    {"Wiebe m", "wiebe_m", 2, GET(c.geom.wiebe_m), 0.5, 4.0, 2.0, 3.0, "%.2f"},
-    {"burn duration (deg)", "delta_theta_burn_deg", 2,
-     GET(c.geom.delta_theta_burn_deg), 20.0, 90.0, 40.0, 60.0, "%.0f"},
-    {"spark base (deg BTDC)", "spark_base_btdc_deg", 2,
-     GET(c.geom.spark_base_btdc_deg), 0.0, 30.0, 5.0, 20.0, "%.1f"},
-    {"spark rpm gain (deg/1000rpm)", "spark_rpm_gain_deg_per_1000rpm", 2,
-     GET(c.geom.spark_rpm_gain_deg_per_1000rpm), 0.0, 12.0, 3.0, 8.0, "%.2f"},
-    {"spark MAP retard (deg/kPa)", "spark_map_retard_deg_per_kpa", 2,
-     GET(c.geom.spark_map_retard_deg_per_kpa), 0.0, 0.5, 0.05, 0.25, "%.3f"},
-    {"combustion efficiency", "combustion_efficiency", 2,
-     GET(c.geom.combustion_efficiency), 0.05, 1.0, 0.25, 0.35, "%.3f"},
-};
-static const int FIELD_COUNT = (int)(sizeof FIELDS / sizeof FIELDS[0]);
 
 static bool config_equal(const EngineConfig &a, const EngineConfig &b) {
   if (a.num_cylinders != b.num_cylinders) {
@@ -82,10 +22,9 @@ static bool config_equal(const EngineConfig &a, const EngineConfig &b) {
       return false;
     }
   }
-  EngineConfig ac = a;
-  EngineConfig bc = b;
-  for (int i = 0; i < FIELD_COUNT; i++) {
-    if (*FIELDS[i].get(ac) != *FIELDS[i].get(bc)) {
+  for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
+    const ConfigField *f = &ENGINE_CONFIG_FIELDS[i];
+    if (*engine_config_field_cptr(&a, f) != *engine_config_field_cptr(&b, f)) {
       return false;
     }
   }
@@ -332,58 +271,73 @@ SpecEditorResult spec_editor_panel_draw(bool *open, const EngineConfig *running,
   }
   ImGui::Separator();
 
-  /* parameters */
+  /* parameters, straight from the field table (physics/engine_config_fields) */
   const EngineConfig defaults = engine_config_default();
-  EngineConfig defaults_mut = defaults;
-  int group = -1;
-  if (ImGui::BeginTable("fields", 3)) {
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed,
-                            ImGui::GetFontSize() * 14.0f);
-    ImGui::TableSetupColumn("slider", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed,
-                            ImGui::GetFontSize() * 2.0f);
-    for (int i = 0; i < FIELD_COUNT; i++) {
-      const Field &f = FIELDS[i];
-      if (f.group != group) {
-        group = f.group;
+  for (int gi = 0; gi < ENGINE_CONFIG_GROUP_COUNT; gi++) {
+    const ConfigGroup &grp = ENGINE_CONFIG_GROUPS[gi];
+    char header[64];
+    snprintf(header, sizeof header, "%s%s", grp.name,
+             grp.advanced ? "  (model tuning)" : "");
+    if (!ImGui::CollapsingHeader(
+            header, grp.advanced ? 0 : ImGuiTreeNodeFlags_DefaultOpen)) {
+      continue;
+    }
+    ImGui::PushID(gi);
+    if (ImGui::BeginTable("fields", 3)) {
+      ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed,
+                              ImGui::GetFontSize() * 14.0f);
+      ImGui::TableSetupColumn("slider", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed,
+                              ImGui::GetFontSize() * 2.0f);
+      for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
+        const ConfigField &f = ENGINE_CONFIG_FIELDS[i];
+        if (f.group != gi) {
+          continue;
+        }
+        double *v = engine_config_field_ptr(&g.draft, &f);
+        const double def = *engine_config_field_cptr(&defaults, &f);
+        const bool has_typ = f.typ_hi > f.typ_lo;
+        const bool unusual = has_typ && (*v < f.typ_lo || *v > f.typ_hi);
+
+        char label[96];
+        if (f.unit[0]) {
+          snprintf(label, sizeof label, "%s (%s)", f.label, f.unit);
+        } else {
+          snprintf(label, sizeof label, "%s", f.label);
+        }
+
+        ImGui::PushID(i);
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::TextDisabled("%s", GROUPS[group]);
-      }
-      double *v = f.get(g.draft);
-      const double def = *f.get(defaults_mut);
-      const bool has_typ = f.typ_hi > f.typ_lo;
-      const bool unusual = has_typ && (*v < f.typ_lo || *v > f.typ_hi);
-
-      ImGui::PushID(i);
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      if (unusual) {
-        ImGui::TextColored(COL_CAUTION, "%s", f.label);
-      } else {
-        ImGui::TextUnformatted(f.label);
-      }
-      if (ImGui::IsItemHovered()) {
-        if (has_typ) {
-          ImGui::SetTooltip("%s\ntypical %.4g - %.4g   default %.4g%s", f.key,
-                            f.typ_lo, f.typ_hi, def,
-                            unusual ? "\noutside the typical range" : "");
+        if (unusual) {
+          ImGui::TextColored(COL_CAUTION, "%s", label);
         } else {
-          ImGui::SetTooltip("%s\ndefault %.4g", f.key, def);
+          ImGui::TextUnformatted(label);
         }
+        if (ImGui::IsItemHovered()) {
+          if (has_typ) {
+            ImGui::SetTooltip("%s\ntypical %.4g - %.4g   default %.4g%s", f.key,
+                              f.typ_lo, f.typ_hi, def,
+                              unusual ? "\noutside the typical range" : "");
+          } else {
+            ImGui::SetTooltip("%s\ndefault %.4g", f.key, def);
+          }
+        }
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::SliderScalar("##v", ImGuiDataType_Double, v, &f.slider_lo,
+                            &f.slider_hi, f.fmt);
+        ImGui::TableSetColumnIndex(2);
+        ImGui::BeginDisabled(*v == def);
+        if (ImGui::Button("R")) {
+          *v = def;
+        }
+        ImGui::EndDisabled();
+        ImGui::PopID();
       }
-      ImGui::TableSetColumnIndex(1);
-      ImGui::SetNextItemWidth(-FLT_MIN);
-      ImGui::SliderScalar("##v", ImGuiDataType_Double, v, &f.lo, &f.hi, f.fmt);
-      ImGui::TableSetColumnIndex(2);
-      ImGui::BeginDisabled(*v == def);
-      if (ImGui::Button("R")) {
-        *v = def;
-      }
-      ImGui::EndDisabled();
-      ImGui::PopID();
+      ImGui::EndTable();
     }
-    ImGui::EndTable();
+    ImGui::PopID();
   }
   ImGui::TextDisabled("Ctrl+click a slider to type a value; amber = outside "
                       "the typical range");
