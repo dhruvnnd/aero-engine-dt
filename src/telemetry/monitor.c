@@ -114,6 +114,44 @@ ChannelStatus channel_rpm_status(double rpm) {
                      : CHANNEL_STALE;
 }
 
+const char *monitor_channel_name(MonitorChannel ch) {
+  switch (ch) {
+  case MON_RPM:
+    return "RPM";
+  case MON_CHT:
+    return "CHT";
+  case MON_EGT:
+    return "EGT";
+  case MON_OIL_TEMP:
+    return "OIL T";
+  case MON_OIL_PRESS:
+    return "OIL P";
+  case MON_FUEL_PRESS:
+    return "FUEL P";
+  case MON_BUS_V:
+    return "BUS V";
+  case MON_BATT_SOC:
+    return "BATT";
+  default:
+    return "?";
+  }
+}
+
+void monitor_classify(const ModelState *s, ChannelStatus out[MON_CHANNELS]) {
+  out[MON_RPM] = channel_rpm_status(s->rpm);
+  out[MON_CHT] = channel_status_for(s->thermal.cht_c, CHANNEL_RANGE_CHT);
+  out[MON_EGT] = channel_status_for(s->thermal.egt_c, CHANNEL_RANGE_EGT);
+  out[MON_OIL_TEMP] =
+      channel_status_for(s->thermal.oil_temp_c, CHANNEL_RANGE_OIL_TEMP);
+  out[MON_OIL_PRESS] =
+      channel_status_for(s->lube.oil_press_kpa, CHANNEL_RANGE_OIL_PRESS);
+  out[MON_FUEL_PRESS] =
+      channel_status_for(s->fuel.fuel_press_kpa, CHANNEL_RANGE_FUEL_PRESS);
+  out[MON_BUS_V] = channel_status_for(s->elec.bus_v, CHANNEL_RANGE_BUS_V);
+  out[MON_BATT_SOC] =
+      channel_status_for(s->elec.batt_soc, CHANNEL_RANGE_BATT_SOC);
+}
+
 void fault_monitor_init(FaultMonitor *m) {
   m->prev_rpm = CHANNEL_STALE;
   m->prev_cht = CHANNEL_STALE;
@@ -143,30 +181,22 @@ static void check_channel(EventLog *log, double sim_time_s, ChannelStatus *prev,
 
 void fault_monitor_check(FaultMonitor *m, EventLog *log, const ModelState *s,
                          double sim_time_s) {
-  check_channel(log, sim_time_s, &m->prev_rpm, channel_rpm_status(s->rpm),
-                "revs per minute", "RPM", s->rpm, "rpm", 0);
-  check_channel(log, sim_time_s, &m->prev_cht,
-                channel_status_for(s->thermal.cht_c, CHANNEL_RANGE_CHT),
+  ChannelStatus st[MON_CHANNELS];
+  monitor_classify(s, st);
+  check_channel(log, sim_time_s, &m->prev_rpm, st[MON_RPM], "revs per minute",
+                "RPM", s->rpm, "rpm", 0);
+  check_channel(log, sim_time_s, &m->prev_cht, st[MON_CHT],
                 "cylinder head temp", "THERM", s->thermal.cht_c, "degC", 0);
-  check_channel(log, sim_time_s, &m->prev_egt,
-                channel_status_for(s->thermal.egt_c, CHANNEL_RANGE_EGT),
-                "exhaust gas temp", "THERM", s->thermal.egt_c, "degC", 0);
-  check_channel(log, sim_time_s, &m->prev_oil_temp,
-                channel_status_for(s->thermal.oil_temp_c,
-                                   CHANNEL_RANGE_OIL_TEMP),
+  check_channel(log, sim_time_s, &m->prev_egt, st[MON_EGT], "exhaust gas temp",
+                "THERM", s->thermal.egt_c, "degC", 0);
+  check_channel(log, sim_time_s, &m->prev_oil_temp, st[MON_OIL_TEMP],
                 "oil temp", "THERM", s->thermal.oil_temp_c, "degC", 0);
-  check_channel(log, sim_time_s, &m->prev_oil_press,
-                channel_status_for(s->lube.oil_press_kpa,
-                                   CHANNEL_RANGE_OIL_PRESS),
+  check_channel(log, sim_time_s, &m->prev_oil_press, st[MON_OIL_PRESS],
                 "oil pressure", "LUBE", s->lube.oil_press_kpa, "kPa", 0);
-  check_channel(log, sim_time_s, &m->prev_fuel_press,
-                channel_status_for(s->fuel.fuel_press_kpa,
-                                   CHANNEL_RANGE_FUEL_PRESS),
+  check_channel(log, sim_time_s, &m->prev_fuel_press, st[MON_FUEL_PRESS],
                 "fuel pressure", "FUEL", s->fuel.fuel_press_kpa, "kPa", 0);
-  check_channel(log, sim_time_s, &m->prev_bus_v,
-                channel_status_for(s->elec.bus_v, CHANNEL_RANGE_BUS_V),
-                "bus voltage", "ELEC", s->elec.bus_v, "V", 1);
-  check_channel(log, sim_time_s, &m->prev_batt_soc,
-                channel_status_for(s->elec.batt_soc, CHANNEL_RANGE_BATT_SOC),
+  check_channel(log, sim_time_s, &m->prev_bus_v, st[MON_BUS_V], "bus voltage",
+                "ELEC", s->elec.bus_v, "V", 1);
+  check_channel(log, sim_time_s, &m->prev_batt_soc, st[MON_BATT_SOC],
                 "battery SoC", "ELEC", s->elec.batt_soc * 100.0, "%", 0);
 }

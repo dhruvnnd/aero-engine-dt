@@ -334,6 +334,7 @@ void sim_panel_draw(bool *open, const ModelState *s, double sim_time_s,
     ImGui::TextDisabled("M              sensor / model feed");
     ImGui::TextDisabled("G / L          gamepad panel / event log");
     ImGui::TextDisabled("F              fullscreen");
+    ImGui::TextDisabled("SPACE          acknowledge alarms");
   }
 
   ImGui::End();
