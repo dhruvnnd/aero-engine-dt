@@ -8,7 +8,7 @@ extern "C" {
 #include <SDL3/SDL.h>
 
 #include "telemetry/monitor.h"
-#include "ui/ui_history.h"
+#include "util/history.h"
 #include "ui/ui_layout.h"
 #include "ui/ui_theme.h"
 
@@ -59,7 +59,7 @@ void ui_dial_gauge(SDL_Renderer *r, UiRect bounds, const UiTheme *th,
  * which case [range.lo, range.hi] is used. */
 void ui_sparkline(SDL_Renderer *r, UiRect bounds, const UiTheme *th,
                   const char *label, const char *unit, int precision,
-                  const UiHistory *hist, ChannelRange range);
+                  const History *hist, ChannelRange range);
 
 /* Grouped vertical bars for comparing a small set (e.g. per-cylinder CHT).
  *  `vals[i]` is drawn against [range.lo, range.hi]; each bar is coloured by

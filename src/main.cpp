@@ -20,6 +20,7 @@
 #include "telemetry/event_log.h"
 #include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
+#include "telemetry/trends.h"
 #include "ui/dashboard.h"
 #include "ui/event_log_panel.h"
 #include "ui/gamepad_panel.h"
@@ -60,6 +61,7 @@ typedef struct {
   SdlInputState input;
   Dashboard dash;
   FaultMonitor faults;
+  Trends trends;
   EventLog events;
 
   double ambient_c;
@@ -150,6 +152,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   sdl_input_init(&app->input);
   dashboard_init(&app->dash);
   fault_monitor_init(&app->faults);
+  trends_init(&app->trends);
   app->sample_accum_s = 0.0;
 
   return SDL_APP_CONTINUE;
@@ -304,7 +307,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   while (app->sample_accum_s >= SAMPLE_PERIOD_S) {
     sensor_read_state(&app->sensor, &app->state, &app->display);
     const ModelState *sampled = app->sensor_mode ? &app->display : &app->state;
-    dashboard_sample(&app->dash, sampled);
+    trends_sample(&app->trends, sampled);
     fault_monitor_check(&app->faults, &app->events, sampled,
                         app->sync.sim_time_s);
     app->sample_accum_s -= SAMPLE_PERIOD_S;
@@ -332,8 +335,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   SDL_RenderClear(renderer);
 
   dashboard_draw(&app->dash, renderer, (float)WIN_W, (float)WIN_H, shown,
-                 app->sync.engine_config.num_cylinders, app->input.throttle,
-                 app->sync.sim_time_s, fps, app->sensor_mode);
+                 &app->trends, app->sync.engine_config.num_cylinders,
+                 app->input.throttle, app->sync.sim_time_s, fps,
+                 app->sensor_mode);
 
   /* disable logical presentation just for imgui */
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
