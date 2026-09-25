@@ -13,6 +13,8 @@ const char *layout_name(int id) {
     return "Systems";
   case LAYOUT_INPUT_LOG:
     return "Input & Log";
+  case LAYOUT_CONFIG:
+    return "Configuration";
   default:
     return "?";
   }
@@ -30,6 +32,9 @@ PanelVisibility layout_visibility(int id) {
     break;
   case LAYOUT_INPUT_LOG:
     v.sim = v.instruments = v.event_log = v.gamepad = true;
+    break;
+  case LAYOUT_CONFIG:
+    v.sim = v.event_log = v.engine_spec = v.spec_editor = true;
     break;
   case LAYOUT_OVERVIEW:
   default:
@@ -91,7 +96,8 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS);
     DOCK(right, PANEL_INSTRUMENTS);
     DOCK(right_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
-         PANEL_CONTROLS, PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD);
+         PANEL_CONTROLS, PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD,
+         PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
     break;
   }
   case LAYOUT_SYSTEMS: {
@@ -104,7 +110,7 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(environment, PANEL_ENVIRONMENT);
     DOCK(rest, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS, PANEL_EVENT_LOG,
          PANEL_GAMEPAD,
-         PANEL_TRENDS);
+         PANEL_TRENDS, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
     break;
   }
   case LAYOUT_INPUT_LOG: {
@@ -117,7 +123,19 @@ void layout_apply(int id, ImVec2 size) {
          PANEL_CYL_TRENDS);
     DOCK(right, PANEL_GAMEPAD);
     DOCK(right_bottom, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS,
-         PANEL_ENVIRONMENT);
+         PANEL_ENVIRONMENT, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
+    break;
+  }
+  case LAYOUT_CONFIG: {
+    /* engine spec beside its editor; log and sim controls underneath, every
+     * other panel tabbed with them (closed until opened from View) */
+    ImGuiID left = carve(rest, ImGuiDir_Left, 0.38f);
+    ImGuiID bottom = carve(rest, ImGuiDir_Down, 0.24f);
+    DOCK(left, PANEL_ENGINE_SPEC);
+    DOCK(rest, PANEL_SPEC_EDITOR);
+    DOCK(bottom, PANEL_EVENT_LOG, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS,
+         PANEL_INSTRUMENTS, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_TRENDS,
+         PANEL_CYL_TRENDS, PANEL_GAMEPAD);
     break;
   }
   case LAYOUT_OVERVIEW:
@@ -128,7 +146,7 @@ void layout_apply(int id, ImVec2 size) {
     ImGuiID right_bottom = carve(rest, ImGuiDir_Down, 0.28f);
     DOCK(left, PANEL_INSTRUMENTS);
     DOCK(left_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
-         PANEL_CONTROLS, PANEL_FAULTS);
+         PANEL_CONTROLS, PANEL_FAULTS, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
     DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS);
     DOCK(right_bottom, PANEL_EVENT_LOG, PANEL_GAMEPAD);
     break;

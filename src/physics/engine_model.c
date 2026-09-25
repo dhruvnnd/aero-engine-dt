@@ -301,15 +301,20 @@ double engine_model_torque_nm(const EngineState *state) {
   return state->torque_nm;
 }
 
-int engine_config_validate(const EngineConfig *cfg, FILE *out) {
+int engine_config_check(const EngineConfig *cfg,
+                       char msgs[][ENGINE_CONFIG_ISSUE_LEN], int max_msgs) {
   int issues = 0;
+#define ISSUE(...)                                                             \
+  do {                                                                         \
+    if (msgs && issues < max_msgs) {                                           \
+      snprintf(msgs[issues], ENGINE_CONFIG_ISSUE_LEN, __VA_ARGS__);            \
+    }                                                                          \
+    issues++;                                                                  \
+  } while (0)
 
   if (cfg->num_cylinders < 1 || cfg->num_cylinders > ENGINE_MAX_CYLINDERS) {
-    if (out) {
-      fprintf(out, "num_cylinders = %d: must be between 1 and %d\n",
-              cfg->num_cylinders, ENGINE_MAX_CYLINDERS);
-    }
-    issues++;
+    ISSUE("num_cylinders = %d: must be between 1 and %d", cfg->num_cylinders,
+          ENGINE_MAX_CYLINDERS);
   } else {
     /* firing_order[0 .. num_cylinders) must be a permutation of
      * 1..num_cylinders; trailing slots must be 0. */
@@ -317,101 +322,113 @@ int engine_config_validate(const EngineConfig *cfg, FILE *out) {
     for (int i = 0; i < cfg->num_cylinders; i++) {
       int f = cfg->firing_order[i];
       if (f < 1 || f > cfg->num_cylinders || seen[f]) {
-        if (out) {
-          fprintf(out,
-                  "firing_order[%d] = %d: not a valid entry for a "
-                  "1..%d permutation (out of range or repeated)\n",
-                  i, f, cfg->num_cylinders);
-        }
-        issues++;
+        ISSUE("firing_order[%d] = %d: not a valid entry for a 1..%d "
+              "permutation (out of range or repeated)",
+              i, f, cfg->num_cylinders);
       } else {
         seen[f] = 1;
       }
     }
     for (int i = cfg->num_cylinders; i < ENGINE_MAX_CYLINDERS; i++) {
       if (cfg->firing_order[i] != 0) {
-        if (out) {
-          fprintf(out,
-                  "firing_order[%d] = %d: slot beyond num_cylinders (%d) "
-                  "should be 0\n",
-                  i, cfg->firing_order[i], cfg->num_cylinders);
-        }
-        issues++;
+        ISSUE("firing_order[%d] = %d: slot beyond num_cylinders (%d) should "
+              "be 0",
+              i, cfg->firing_order[i], cfg->num_cylinders);
       }
     }
   }
 
   if (cfg->inertia_kg_m2 <= 0.0) {
-    if (out) {
-      fprintf(out, "inertia_kg_m2 = %g: must be positive\n",
-              cfg->inertia_kg_m2);
-    }
-    issues++;
+    ISSUE("inertia_kg_m2 = %g: must be positive", cfg->inertia_kg_m2);
   }
   if (cfg->map_tau_s <= 0.0) {
-    if (out) {
-      fprintf(out, "map_tau_s = %g: must be positive\n", cfg->map_tau_s);
-    }
-    issues++;
+    ISSUE("map_tau_s = %g: must be positive", cfg->map_tau_s);
   }
   if (cfg->friction_coeff_nm_per_rad_s <= 0.0) {
-    if (out) {
-      fprintf(out, "friction_coeff_nm_per_rad_s = %g: must be positive\n",
-              cfg->friction_coeff_nm_per_rad_s);
-    }
-    issues++;
+    ISSUE("friction_coeff_nm_per_rad_s = %g: must be positive",
+          cfg->friction_coeff_nm_per_rad_s);
+  }
+  if (cfg->starter_torque_nm <= 0.0) {
+    ISSUE("starter_torque_nm = %g: must be positive", cfg->starter_torque_nm);
+  }
+  if (cfg->starter_catch_rpm <= 0.0) {
+    ISSUE("starter_catch_rpm = %g: must be positive", cfg->starter_catch_rpm);
   }
 
   const EngineGeometry *g = &cfg->geom;
   if (g->bore_m <= 0.0 || g->stroke_m <= 0.0) {
-    if (out) {
-      fprintf(out, "geom: bore_m/stroke_m must be positive\n");
-    }
-    issues++;
+    ISSUE("geom: bore_m/stroke_m must be positive");
   }
   if (g->conrod_len_m <= g->stroke_m / 2.0) {
-    if (out) {
-      fprintf(out,
-              "geom: conrod_len_m (%g) must exceed stroke_m/2 (%g) -- "
-              "slider-crank geometry can't close otherwise\n",
-              g->conrod_len_m, g->stroke_m / 2.0);
-    }
-    issues++;
+    ISSUE("geom: conrod_len_m (%g) must exceed stroke_m/2 (%g) -- "
+          "slider-crank geometry can't close otherwise",
+          g->conrod_len_m, g->stroke_m / 2.0);
   }
   if (g->compression_ratio <= 1.0) {
-    if (out) {
-      fprintf(out, "geom: compression_ratio must exceed 1.0\n");
-    }
-    issues++;
+    ISSUE("geom: compression_ratio must exceed 1.0");
   }
   if (g->m_recip_kg <= 0.0) {
-    if (out) {
-      fprintf(out, "geom: m_recip_kg must be positive\n");
-    }
-    issues++;
+    ISSUE("geom: m_recip_kg must be positive");
   }
   if (g->delta_theta_burn_deg <= 0.0) {
-    if (out) {
-      fprintf(out, "geom: delta_theta_burn_deg must be positive\n");
-    }
-    issues++;
+    ISSUE("geom: delta_theta_burn_deg must be positive");
   }
   if (g->combustion_efficiency <= 0.0 || g->combustion_efficiency > 1.0) {
-    if (out) {
-      fprintf(out, "geom: combustion_efficiency must be in (0,1]\n");
-    }
-    issues++;
+    ISSUE("geom: combustion_efficiency must be in (0,1]");
   }
   if (g->evo_deg < 0.0 || g->evo_deg >= 720.0 || g->ivc_deg < 0.0 ||
       g->ivc_deg >= 720.0 || g->evo_deg >= g->ivc_deg) {
-    if (out) {
-      fprintf(out,
-              "geom: evo_deg (%g) and ivc_deg (%g) must both be in [0,720) "
-              "with evo_deg < ivc_deg\n",
-              g->evo_deg, g->ivc_deg);
-    }
-    issues++;
+    ISSUE("geom: evo_deg (%g) and ivc_deg (%g) must both be in [0,720) with "
+          "evo_deg < ivc_deg",
+          g->evo_deg, g->ivc_deg);
   }
-
+#undef ISSUE
   return issues;
+}
+
+int engine_config_validate(const EngineConfig *cfg, FILE *out) {
+  char msgs[ENGINE_CONFIG_MAX_ISSUES][ENGINE_CONFIG_ISSUE_LEN];
+  const int n = engine_config_check(cfg, msgs, ENGINE_CONFIG_MAX_ISSUES);
+  if (out) {
+    const int shown = n < ENGINE_CONFIG_MAX_ISSUES ? n : ENGINE_CONFIG_MAX_ISSUES;
+    for (int i = 0; i < shown; i++) {
+      fprintf(out, "%s\n", msgs[i]);
+    }
+  }
+  return n;
+}
+
+EngineDerived engine_config_derived(const EngineConfig *cfg) {
+  EngineDerived d;
+  const EngineGeometry *g = &cfg->geom;
+  const double vd = cylinder_displacement_m3(g);
+  d.displacement_per_cyl_l = vd * 1000.0;
+  d.total_displacement_l = vd * (double)cfg->num_cylinders * 1000.0;
+  d.clearance_cc = g->compression_ratio > 1.0
+                       ? cylinder_clearance_m3(g, g->compression_ratio) * 1.0e6
+                       : 0.0;
+  d.firing_interval_deg =
+      cfg->num_cylinders > 0 ? 720.0 / (double)cfg->num_cylinders : 0.0;
+  d.bore_stroke_ratio = g->stroke_m > 0.0 ? g->bore_m / g->stroke_m : 0.0;
+  d.rod_ratio = g->stroke_m > 0.0 ? g->conrod_len_m / g->stroke_m : 0.0;
+  d.piston_speed_3000rpm_ms = 2.0 * g->stroke_m * 3000.0 / 60.0;
+  return d;
+}
+
+void engine_default_firing_order(int num_cylinders,
+                                 int out[ENGINE_MAX_CYLINDERS]) {
+  /* Common orders: inline-4 1-3-4-2, inline-6 1-5-3-6-2-4; the others are the
+   * usual conventions for their cylinder counts. */
+  static const int ORDERS[ENGINE_MAX_CYLINDERS + 1][ENGINE_MAX_CYLINDERS] = {
+      {0, 0, 0, 0, 0, 0}, {1, 0, 0, 0, 0, 0}, {1, 2, 0, 0, 0, 0},
+      {1, 3, 2, 0, 0, 0}, {1, 3, 4, 2, 0, 0}, {1, 2, 4, 5, 3, 0},
+      {1, 5, 3, 6, 2, 4}};
+  const int n = num_cylinders < 0
+                    ? 0
+                    : (num_cylinders > ENGINE_MAX_CYLINDERS
+                           ? ENGINE_MAX_CYLINDERS
+                           : num_cylinders);
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    out[i] = ORDERS[n][i];
+  }
 }

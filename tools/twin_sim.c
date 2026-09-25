@@ -366,6 +366,8 @@ int main(int argc, char **argv) {
     /* ERR_OPEN already fell back to engine_config_default() with its own
      * stderr diagnostic; proceed with that rather than treating it as
      * fatal. */
+    /* Fuel/air flow follow the spec's geometry, same as the dashboard. */
+    model_sync_apply_engine_config(&sync, &sync.engine_config);
   }
 
   double alt0 = alt_set ? alt_override : profile->altitude_m(0.0);

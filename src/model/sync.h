@@ -27,6 +27,12 @@ typedef struct {
 /* Loads the default engine/thermal/fuel/lube/cylinder configs, zeroes clock. */
 void model_sync_init(ModelSync *sync);
 
+/* Installs `cfg` as the engine config and keeps the fuel model's displacement in
+ * step with the engine geometry (bore, stroke, cylinder count) so fuel and air
+ * flow follow the engine that was configured. `cfg` may alias
+ * sync->engine_config. */
+void model_sync_apply_engine_config(ModelSync *sync, const EngineConfig *cfg);
+
 void model_sync_step(ModelSync *sync, ModelState *state,
                      const EngineInput *input, const EnvInput *env, double dt);
 

@@ -29,11 +29,13 @@
 #include "ui/alarm_strip.h"
 #include "ui/controls_panel.h"
 #include "ui/cyl_trends_panel.h"
+#include "ui/engine_spec_panel.h"
 #include "ui/event_log_panel.h"
 #include "ui/faults_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/layouts.h"
 #include "ui/readout_panels.h"
+#include "ui/spec_editor_panel.h"
 #include "ui/trends_panel.h"
 
 /* Initial window size; shrunk to fit the display if it is too big. */
@@ -250,34 +252,56 @@ static void record_sample(AppState *app) {
   run_recorder_write(&app->recorder, &s);
 }
 
-/* Loads `path` (NULL / "" = built-in default engine) and restarts the
- * simulation with it. Returns false, changing nothing, if the file is bad.
- * Restarting also clears injected faults and ends any recording. */
-static bool load_engine_spec(AppState *app, const char *path) {
+/* Restarts the simulation with `cfg`. `label` names it (a spec file, or a
+ * description); "" means the built-in default. Clears injected faults, trends
+ * and alarms and ends any recording. */
+static void apply_engine_config(AppState *app, const EngineConfig *cfg,
+                                const char *label) {
+  const EngineConfig c = *cfg; /* cfg may point into app->sync */
+  char name[sizeof app->spec_path];
+  snprintf(name, sizeof name, "%s", label ? label : ""); /* may alias spec_path */
+
   ModelSync fresh;
   model_sync_init(&fresh);
-  if (path && path[0]) {
-    EngineSpecResult r = engine_spec_load(path, &fresh.engine_config);
-    if (r.status == ENGINE_SPEC_ERR_OPEN) {
-      event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING,
-                     "CONFIG", "couldn't open engine spec %s", path);
-      return false;
-    }
-    if (r.status != ENGINE_SPEC_OK) {
-      event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING,
-                     "CONFIG", "engine spec parse error at line %d -- not loaded",
-                     r.error_line);
-      return false;
-    }
+  if (name[0]) {
+    /* an explicit engine: fuel / air flow follow its geometry */
+    model_sync_apply_engine_config(&fresh, &c);
+  } else {
+    fresh.engine_config = c;
   }
 
   recording_stop(app, "simulation restarted");
   app->sync = fresh;
-  snprintf(app->spec_path, sizeof app->spec_path, "%s", path ? path : "");
+  memcpy(app->spec_path, name, sizeof name);
   reset_simulation_state(app);
   event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "CONFIG",
-                 "engine config: %s",
-                 app->spec_path[0] ? app->spec_path : "built-in default");
+                 "engine config: %s", name[0] ? name : "built-in default");
+}
+
+/* Loads and validates the spec file at `path`, then restarts with it. Returns
+ * false, changing nothing, if the file is unreadable, malformed or invalid. */
+static bool load_engine_spec(AppState *app, const char *path) {
+  EngineConfig cfg;
+  const EngineSpecResult r = engine_spec_load(path, &cfg);
+  if (r.status == ENGINE_SPEC_ERR_OPEN) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING, "CONFIG",
+                   "couldn't open engine spec %s", path);
+    return false;
+  }
+  if (r.status != ENGINE_SPEC_OK) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING, "CONFIG",
+                   "engine spec parse error at line %d -- not loaded",
+                   r.error_line);
+    return false;
+  }
+  char msgs[ENGINE_CONFIG_MAX_ISSUES][ENGINE_CONFIG_ISSUE_LEN];
+  const int issues = engine_config_check(&cfg, msgs, ENGINE_CONFIG_MAX_ISSUES);
+  if (issues > 0) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING, "CONFIG",
+                   "%s has %d issue(s), not loaded: %s", path, issues, msgs[0]);
+    return false;
+  }
+  apply_engine_config(app, &cfg, path);
   return true;
 }
 
@@ -340,6 +364,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   }
   if (engine_spec_path) {
     snprintf(app->spec_path, sizeof app->spec_path, "%s", engine_spec_path);
+    model_sync_apply_engine_config(&app->sync, &app->sync.engine_config);
   }
   SDL_Log("engine config: %s",
           engine_spec_path ? engine_spec_path : "built-in default");
@@ -571,7 +596,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                                filters, 2, NULL, false);
       }
       if (ImGui::MenuItem("Restart simulation")) {
-        load_engine_spec(app, app->spec_path);
+        apply_engine_config(app, &app->sync.engine_config, app->spec_path);
       }
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Cold-start the engine. Clears injected faults,\n"
@@ -602,6 +627,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("Sim", NULL, &app->panels.sim);
       ImGui::MenuItem("Controls", NULL, &app->panels.controls);
       ImGui::MenuItem("Fault Injection", NULL, &app->panels.faults);
+      ImGui::MenuItem("Engine Spec", NULL, &app->panels.engine_spec);
+      ImGui::MenuItem("Spec Editor", NULL, &app->panels.spec_editor);
       ImGui::MenuItem("Instruments", NULL, &app->panels.instruments);
       ImGui::MenuItem("Environment", NULL, &app->panels.environment);
       ImGui::MenuItem("Cylinders", NULL, &app->panels.cylinders);
@@ -631,6 +658,18 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   if (app->panels.sim) {
     sim_panel_draw(&app->panels.sim, shown, app->sync.sim_time_s,
                    app->input.throttle, fps, app->sensor_mode != 0, &app->clock);
+  }
+  if (app->panels.engine_spec) {
+    engine_spec_panel_draw(&app->panels.engine_spec, &app->sync,
+                           app->spec_path);
+  }
+  if (app->panels.spec_editor) {
+    const SpecEditorResult ed = spec_editor_panel_draw(
+        &app->panels.spec_editor, &app->sync.engine_config, app->spec_path,
+        app->window_ctx.window, &app->events, app->sync.sim_time_s);
+    if (ed.apply) {
+      apply_engine_config(app, &ed.config, ed.name);
+    }
   }
   if (app->panels.controls) {
     const ControlActions act = controls_panel_draw(
