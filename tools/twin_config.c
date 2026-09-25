@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "physics/crank_thermo.h"
+#include "physics/engine_config_fields.h"
 #include "physics/engine_model.h"
 #include "physics/engine_spec_io.h"
 
@@ -139,24 +140,11 @@ static int cmd_check(const char *path) {
   printf("\n");
   printf("firing interval              = %.1f deg (720 / num_cylinders)\n",
          720.0 / cfg.num_cylinders);
-  printf("inertia_kg_m2                = %.6g\n", cfg.inertia_kg_m2);
-  printf("map_tau_s                    = %.6g\n", cfg.map_tau_s);
-  printf("friction_coeff_nm_per_rad_s  = %.6g\n",
-         cfg.friction_coeff_nm_per_rad_s);
-
-  printf("bore_m / stroke_m / conrod_len_m = %.6g / %.6g / %.6g\n",
-         cfg.geom.bore_m, cfg.geom.stroke_m, cfg.geom.conrod_len_m);
-  printf("compression_ratio            = %.6g\n", cfg.geom.compression_ratio);
-  printf("evo_deg / ivc_deg             = %.6g / %.6g\n", cfg.geom.evo_deg,
-         cfg.geom.ivc_deg);
-  printf("m_recip_kg                    = %.6g\n", cfg.geom.m_recip_kg);
-  printf("wiebe_a / wiebe_m / burn_deg  = %.6g / %.6g / %.6g\n",
-         cfg.geom.wiebe_a, cfg.geom.wiebe_m, cfg.geom.delta_theta_burn_deg);
-  printf("spark base/rpm_gain/map_retard = %.6g / %.6g / %.6g\n",
-         cfg.geom.spark_base_btdc_deg, cfg.geom.spark_rpm_gain_deg_per_1000rpm,
-         cfg.geom.spark_map_retard_deg_per_kpa);
-  printf("combustion_efficiency         = %.6g\n",
-         cfg.geom.combustion_efficiency);
+  for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
+    const ConfigField *f = &ENGINE_CONFIG_FIELDS[i];
+    printf("%-31s = %.6g%s%s\n", f->key, *engine_config_field_cptr(&cfg, f),
+           f->unit[0] ? " " : "", f->unit);
+  }
 
   double displacement_l =
       cylinder_displacement_m3(&cfg.geom) * cfg.num_cylinders * 1000.0;
