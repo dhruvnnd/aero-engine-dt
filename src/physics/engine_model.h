@@ -93,6 +93,33 @@ double engine_model_torque_nm(const EngineState *state);
  * clean. */
 int engine_config_validate(const EngineConfig *cfg, FILE *out);
 
+/* Same checks as engine_config_validate(), but the messages come back in
+ * `msgs` (up to `max_msgs`, each at most ENGINE_CONFIG_ISSUE_LEN chars, no
+ * trailing newline) instead of being printed. Returns the total number of
+ * issues, which can exceed `max_msgs`. `msgs` may be NULL to just count. */
+#define ENGINE_CONFIG_MAX_ISSUES 32
+#define ENGINE_CONFIG_ISSUE_LEN 160
+int engine_config_check(const EngineConfig *cfg,
+                        char msgs[][ENGINE_CONFIG_ISSUE_LEN], int max_msgs);
+
+/* Figures worth showing next to a config; safe on a not-yet-valid config. */
+typedef struct {
+  double displacement_per_cyl_l;
+  double total_displacement_l;
+  double clearance_cc;            /* per cylinder */
+  double firing_interval_deg;     /* 720 / num_cylinders */
+  double bore_stroke_ratio;
+  double rod_ratio;               /* conrod length / stroke */
+  double piston_speed_3000rpm_ms; /* mean piston speed */
+} EngineDerived;
+EngineDerived engine_config_derived(const EngineConfig *cfg);
+
+/* A conventional firing order for 1..ENGINE_MAX_CYLINDERS cylinders (e.g.
+ * 1-3-4-2 for four), zero-filled beyond `num_cylinders`. Out-of-range counts
+ * are clamped. */
+void engine_default_firing_order(int num_cylinders,
+                                 int out[ENGINE_MAX_CYLINDERS]);
+
 #ifdef __cplusplus
 }
 #endif

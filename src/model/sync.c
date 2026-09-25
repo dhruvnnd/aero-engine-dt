@@ -21,6 +21,16 @@ void model_sync_init(ModelSync *sync) {
   sync->sim_time_s = 0.0;
 }
 
+void model_sync_apply_engine_config(ModelSync *sync, const EngineConfig *cfg) {
+  const EngineConfig c = *cfg;
+  sync->engine_config = c;
+  const double displacement_l =
+      cylinder_displacement_m3(&c.geom) * (double)c.num_cylinders * 1000.0;
+  if (displacement_l > 0.0) {
+    sync->fuel_config.displacement_l = displacement_l;
+  }
+}
+
 void model_sync_step(ModelSync *sync, ModelState *state,
                      const EngineInput *input, const EnvInput *env, double dt) {
   /* Computed first (it only depends on `env`, not engine state) so its

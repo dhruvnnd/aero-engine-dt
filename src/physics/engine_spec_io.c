@@ -111,6 +111,10 @@ EngineSpecResult engine_spec_load(const char *path, EngineConfig *out) {
     } else if (strcmp(key, "friction_coeff_nm_per_rad_s") == 0) {
       parse_ok =
           (parse_double_strict(value, &out->friction_coeff_nm_per_rad_s) == 0);
+    } else if (strcmp(key, "starter_torque_nm") == 0) {
+      parse_ok = (parse_double_strict(value, &out->starter_torque_nm) == 0);
+    } else if (strcmp(key, "starter_catch_rpm") == 0) {
+      parse_ok = (parse_double_strict(value, &out->starter_catch_rpm) == 0);
     } else if (strcmp(key, "bore_m") == 0) {
       parse_ok = (parse_double_strict(value, &out->geom.bore_m) == 0);
     } else if (strcmp(key, "stroke_m") == 0) {
@@ -210,6 +214,13 @@ int engine_spec_save(const char *path, const EngineConfig *cfg) {
           "# speed. Typical range: 0.05 - 0.2.\n"
           "friction_coeff_nm_per_rad_s = %.6g\n\n",
           cfg->friction_coeff_nm_per_rad_s);
+
+  fprintf(f,
+          "# Starter motor torque while cranking, N*m, and the crank speed\n"
+          "# (rpm) at which the engine is considered to have caught.\n"
+          "starter_torque_nm = %.6g\n"
+          "starter_catch_rpm = %.6g\n\n",
+          cfg->starter_torque_nm, cfg->starter_catch_rpm);
 
   fprintf(f, "# crank-angle-resolved combustion geometry, shared by\n"
              "# every cylinder (a cylinder's own compression_trim etc. scale\n"

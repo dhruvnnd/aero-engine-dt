@@ -16,6 +16,8 @@ struct PanelVisibility {
   bool gamepad;
   bool controls;
   bool faults;
+  bool engine_spec;
+  bool spec_editor;
 };
 
 enum {
@@ -23,6 +25,7 @@ enum {
   LAYOUT_TRENDS,
   LAYOUT_SYSTEMS,
   LAYOUT_INPUT_LOG,
+  LAYOUT_CONFIG,
   LAYOUT_COUNT
 };
 
