@@ -29,10 +29,6 @@
 /* ImGui size multiplier */
 #define UI_ZOOM 1.2f
 
-/* Companion window that shows the gamepad bindings + live input state. */
-#define GP_WIN_W 540
-#define GP_WIN_H 860
-
 /* Trend sampling cadence -- the histories advance at this rate regardless of
  * render frame rate. */
 #define SAMPLE_PERIOD_S 0.1
@@ -50,9 +46,7 @@
 
 typedef struct {
   SdlWindowContext window_ctx;
-  SdlWindowContext
-      gamepad_ctx; /* companion panel; window == NULL if it failed */
-  bool gamepad_win_shown;
+  bool show_gamepad;   /* ImGui gamepad window open/closed */
   bool show_event_log; /* ImGui event log window open/closed */
   SdlFrameTimer timer;
 
@@ -108,19 +102,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                                     app->window_ctx.renderer);
   ImGui_ImplSDLRenderer3_Init(app->window_ctx.renderer);
 
-  /* Optional -- the sim runs fine without it, so a failure here is not fatal.
-   * Created hidden; the G key brings it up on demand. */
-  if (sdl_window_init(&app->gamepad_ctx, "aero engine dt | gamepad", GP_WIN_W,
-                      GP_WIN_H)) {
-    SDL_HideWindow(app->gamepad_ctx.window);
-    app->gamepad_win_shown = false;
-  } else {
-    SDL_Log("gamepad panel window unavailable: %s", SDL_GetError());
-    app->gamepad_ctx.window = NULL;
-    app->gamepad_ctx.renderer = NULL;
-    app->gamepad_win_shown = false;
-  }
-
+  app->show_gamepad = false; /* G toggles it */
   app->show_event_log = true; /* L toggles it */
 
   event_log_init(&app->events);
@@ -188,16 +170,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     return SDL_APP_CONTINUE;
   }
 
-  /* Closing a companion panel just dismisses it; closing the main window (or
-   * any other) quits. Handled explicitly so a second open window doesn't stop
-   * the last-window-closed quit from reaching us. */
   if (event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-    if (app->gamepad_ctx.window &&
-        event->window.windowID == SDL_GetWindowID(app->gamepad_ctx.window)) {
-      SDL_HideWindow(app->gamepad_ctx.window);
-      app->gamepad_win_shown = false;
-      return SDL_APP_CONTINUE;
-    }
     return SDL_APP_SUCCESS;
   }
 
@@ -211,17 +184,10 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
-      event->key.key == SDLK_G && app->gamepad_ctx.window) {
-    app->gamepad_win_shown = !app->gamepad_win_shown;
-    if (app->gamepad_win_shown) {
-      SDL_ShowWindow(app->gamepad_ctx.window);
-      SDL_RaiseWindow(app->gamepad_ctx.window);
-    } else {
-      SDL_HideWindow(app->gamepad_ctx.window);
-    }
+      event->key.key == SDLK_G) {
+    app->show_gamepad = !app->show_gamepad;
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "PANEL",
-                   "gamepad panel %s",
-                   app->gamepad_win_shown ? "shown" : "hidden");
+                   "gamepad panel %s", app->show_gamepad ? "shown" : "hidden");
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -353,6 +319,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   if (app->show_event_log) {
     event_log_panel_draw(&app->show_event_log, &app->events);
   }
+  if (app->show_gamepad) {
+    gamepad_panel_draw(&app->show_gamepad, &app->input);
+  }
   ImGui::ShowDemoWindow();
   ImGui::Render();
 
@@ -371,14 +340,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                                    SDL_LOGICAL_PRESENTATION_LETTERBOX);
   SDL_RenderPresent(renderer);
 
-  if (app->gamepad_ctx.window && app->gamepad_win_shown) {
-    SDL_Renderer *gr = app->gamepad_ctx.renderer;
-    SDL_SetRenderDrawColor(gr, 10, 14, 12, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(gr);
-    gamepad_panel_draw(gr, (float)GP_WIN_W, (float)GP_WIN_H, &app->input);
-    SDL_RenderPresent(gr);
-  }
-
   return SDL_APP_CONTINUE;
 }
 
@@ -389,8 +350,5 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
-  if (app->gamepad_ctx.window) {
-    sdl_window_shutdown(&app->gamepad_ctx);
-  }
   sdl_window_shutdown(&app->window_ctx);
 }
