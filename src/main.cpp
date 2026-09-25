@@ -24,6 +24,7 @@
 #include "ui/dashboard.h"
 #include "ui/event_log_panel.h"
 #include "ui/gamepad_panel.h"
+#include "ui/readout_panels.h"
 
 #define WIN_W 1000
 #define WIN_H 680
@@ -50,6 +51,13 @@ typedef struct {
   SdlWindowContext window_ctx;
   bool show_gamepad;   /* ImGui gamepad window open/closed */
   bool show_event_log; /* ImGui event log window open/closed */
+  bool show_sim;
+  bool show_instruments;
+  bool show_environment;
+  bool show_cylinders;
+  bool show_legacy_dashboard; /* old hand-drawn screen, until ImPlot trends */
+  bool show_imgui_demo;
+  bool quit_requested;
   SdlFrameTimer timer;
 
   ModelSync sync;
@@ -108,6 +116,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
   app->show_gamepad = false; /* G toggles it */
   app->show_event_log = true; /* L toggles it */
+  app->show_sim = true;
+  app->show_instruments = true;
+  app->show_environment = true;
+  app->show_cylinders = true;
+  app->show_legacy_dashboard = true;
+  app->show_imgui_demo = false;
 
   event_log_init(&app->events);
   event_log_push(&app->events, 0.0, EVENT_INFO, "SYSTEM", "dashboard started");
@@ -322,22 +336,62 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
                                ImGuiDockNodeFlags_PassthruCentralNode);
 #endif
+  if (ImGui::BeginMainMenuBar()) {
+    if (ImGui::BeginMenu("File")) {
+      if (ImGui::MenuItem("Quit")) {
+        app->quit_requested = true;
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("View")) {
+      ImGui::MenuItem("Sim", NULL, &app->show_sim);
+      ImGui::MenuItem("Instruments", NULL, &app->show_instruments);
+      ImGui::MenuItem("Environment", NULL, &app->show_environment);
+      ImGui::MenuItem("Cylinders", NULL, &app->show_cylinders);
+      ImGui::MenuItem("Event Log", "L", &app->show_event_log);
+      ImGui::MenuItem("Gamepad", "G", &app->show_gamepad);
+      ImGui::Separator();
+      ImGui::MenuItem("Legacy dashboard", NULL, &app->show_legacy_dashboard);
+      ImGui::MenuItem("ImGui demo", NULL, &app->show_imgui_demo);
+      ImGui::EndMenu();
+    }
+    ImGui::EndMainMenuBar();
+  }
+
+  if (app->show_sim) {
+    sim_panel_draw(&app->show_sim, shown, app->sync.sim_time_s,
+                   app->input.throttle, fps, app->sensor_mode != 0);
+  }
+  if (app->show_instruments) {
+    instruments_panel_draw(&app->show_instruments, shown);
+  }
+  if (app->show_environment) {
+    environment_panel_draw(&app->show_environment, shown);
+  }
+  if (app->show_cylinders) {
+    cylinders_panel_draw(&app->show_cylinders, shown,
+                         app->sync.engine_config.num_cylinders);
+  }
   if (app->show_event_log) {
     event_log_panel_draw(&app->show_event_log, &app->events);
   }
   if (app->show_gamepad) {
     gamepad_panel_draw(&app->show_gamepad, &app->input);
   }
-  ImGui::ShowDemoWindow();
+  if (app->show_imgui_demo) {
+    ImGui::ShowDemoWindow(&app->show_imgui_demo);
+  }
   ImGui::Render();
 
   SDL_SetRenderDrawColor(renderer, 10, 14, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  dashboard_draw(&app->dash, renderer, (float)WIN_W, (float)WIN_H, shown,
-                 &app->trends, app->sync.engine_config.num_cylinders,
-                 app->input.throttle, app->sync.sim_time_s, fps,
-                 app->sensor_mode);
+  if (app->show_legacy_dashboard) {
+    dashboard_draw(&app->dash, renderer, (float)WIN_W, (float)WIN_H, shown,
+                   &app->trends, app->sync.engine_config.num_cylinders,
+                   app->input.throttle, app->sync.sim_time_s, fps,
+                   app->sensor_mode);
+  }
 
   /* disable logical presentation just for imgui */
   SDL_SetRenderLogicalPresentation(renderer, 0, 0,
@@ -347,7 +401,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                                    SDL_LOGICAL_PRESENTATION_LETTERBOX);
   SDL_RenderPresent(renderer);
 
-  return SDL_APP_CONTINUE;
+  return app->quit_requested ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
