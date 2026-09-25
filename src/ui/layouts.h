@@ -13,6 +13,7 @@ struct PanelVisibility {
   bool trends;
   bool event_log;
   bool gamepad;
+  bool faults;
 };
 
 enum {

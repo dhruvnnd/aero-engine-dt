@@ -10,6 +10,7 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include "implot.h"
 
+#include "model/sim_clock.h"
 #include "model/state.h"
 #include "model/sync.h"
 #include "physics/engine_model.h"
@@ -25,6 +26,7 @@
 #include "telemetry/trends.h"
 #include "ui/alarm_strip.h"
 #include "ui/event_log_panel.h"
+#include "ui/faults_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/layouts.h"
 #include "ui/readout_panels.h"
@@ -72,6 +74,9 @@ typedef struct {
   SdlInputState input;
   FaultMonitor faults;
   Annunciator ann;
+  SimClock clock;
+  bool logged_paused;   /* clock state last written to the event log */
+  int logged_speed_idx;
   Trends trends;
   EventLog events;
 
@@ -195,6 +200,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   sdl_input_init(&app->input);
   fault_monitor_init(&app->faults);
   annunciator_init(&app->ann);
+  sim_clock_init(&app->clock);
+  app->logged_paused = app->clock.paused;
+  app->logged_speed_idx = app->clock.speed_idx;
   trends_init(&app->trends);
   app->sample_accum_s = 0.0;
 
@@ -237,6 +245,14 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     app->panels.gamepad = !app->panels.gamepad;
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "PANEL",
                    "gamepad panel %s", app->panels.gamepad ? "shown" : "hidden");
+  }
+
+  if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+      event->key.key == SDLK_P) {
+    app->clock.paused = !app->clock.paused;
+  }
+  if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_PERIOD) {
+    sim_clock_request_step(&app->clock);
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -332,8 +348,16 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   in.load_torque_nm = DEMO_LOAD_NM;
   in.ambient_pressure_kpa = atm.pressure_kpa;
 
+  /* Sim time for this frame: scaled by speed, frozen while paused. Physics is
+   * stepped in slices of at most SIM_CLOCK_MAX_STEP_S so fast-forward and slow
+   * frames stay numerically tame. */
+  const double sim_dt = sim_clock_advance(&app->clock, dt);
   EngineRunState prev_run_state = app->state.engine.run_state;
-  model_sync_step(&app->sync, &app->state, &in, &env_in, dt);
+  double remaining = sim_dt;
+  double h;
+  while ((h = sim_clock_take_step(&remaining)) > 0.0) {
+    model_sync_step(&app->sync, &app->state, &in, &env_in, h);
+  }
   EngineRunState cur_run_state = app->state.engine.run_state;
   if (prev_run_state != ENGINE_STOPPED && cur_run_state == ENGINE_STOPPED) {
     if (app->engine_stop_requested) {
@@ -353,7 +377,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   /* Refresh the instrument feed + trend rings at a fixed cadence (not per
    * render frame), so the gauges read a lively ~10 Hz sensor sample rather
    * than fresh static every frame. */
-  app->sample_accum_s += dt;
+  app->sample_accum_s += sim_dt;
   while (app->sample_accum_s >= SAMPLE_PERIOD_S) {
     sensor_read_state(&app->sensor, &app->state, &app->display);
     const ModelState *sampled = app->sensor_mode ? &app->display : &app->state;
@@ -410,6 +434,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (ImGui::BeginMenu("View")) {
       ImGui::MenuItem("Alarms", NULL, &app->panels.alarms);
       ImGui::MenuItem("Sim", NULL, &app->panels.sim);
+      ImGui::MenuItem("Fault Injection", NULL, &app->panels.faults);
       ImGui::MenuItem("Instruments", NULL, &app->panels.instruments);
       ImGui::MenuItem("Environment", NULL, &app->panels.environment);
       ImGui::MenuItem("Cylinders", NULL, &app->panels.cylinders);
@@ -433,7 +458,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   if (app->panels.sim) {
     sim_panel_draw(&app->panels.sim, shown, app->sync.sim_time_s,
-                   app->input.throttle, fps, app->sensor_mode != 0);
+                   app->input.throttle, fps, app->sensor_mode != 0, &app->clock);
+  }
+  if (app->panels.faults) {
+    faults_panel_draw(&app->panels.faults, app->sync.cyl_config,
+                      app->sync.engine_config.num_cylinders, &app->events,
+                      app->sync.sim_time_s);
   }
   if (app->panels.instruments) {
     instruments_panel_draw(&app->panels.instruments, shown);
@@ -460,6 +490,18 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   if (app->show_implot_demo) {
     ImPlot::ShowDemoWindow(&app->show_implot_demo);
   }
+  /* Pause / speed can change from the panel or a hotkey; log it either way. */
+  if (app->clock.paused != app->logged_paused) {
+    app->logged_paused = app->clock.paused;
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "SIM",
+                   "simulation %s", app->clock.paused ? "paused" : "resumed");
+  }
+  if (app->clock.speed_idx != app->logged_speed_idx) {
+    app->logged_speed_idx = app->clock.speed_idx;
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "SIM",
+                   "sim speed %.2gx", sim_clock_speed(&app->clock));
+  }
+
   ImGui::Render();
 
   SDL_SetRenderDrawColor(renderer, 10, 14, 12, SDL_ALPHA_OPAQUE);
