@@ -133,6 +133,7 @@ target_compile_options(imgui PRIVATE -O2)
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_SOURCE_DIR}/src/platform/*.c"
   "${CMAKE_SOURCE_DIR}/src/ui/*.c"
+  "${CMAKE_SOURCE_DIR}/src/ui/*.cpp"
 )
 list(APPEND APP_SOURCES "${CMAKE_SOURCE_DIR}/src/main.cpp")
 
