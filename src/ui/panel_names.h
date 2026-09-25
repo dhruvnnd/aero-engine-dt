@@ -5,6 +5,7 @@
  * .ini) by name, so the panels and the dock layouts must agree on these. */
 #define PANEL_ALARMS "Alarms"
 #define PANEL_SIM "Sim"
+#define PANEL_CONTROLS "Controls"
 #define PANEL_FAULTS "Fault Injection"
 #define PANEL_INSTRUMENTS "Instruments"
 #define PANEL_ENVIRONMENT "Environment"

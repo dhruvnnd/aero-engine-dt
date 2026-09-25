@@ -10,6 +10,7 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include "implot.h"
 
+#include "data/run_recorder.h"
 #include "model/sim_clock.h"
 #include "model/state.h"
 #include "model/sync.h"
@@ -26,6 +27,7 @@
 #include "telemetry/sensor.h"
 #include "telemetry/trends.h"
 #include "ui/alarm_strip.h"
+#include "ui/controls_panel.h"
 #include "ui/cyl_trends_panel.h"
 #include "ui/event_log_panel.h"
 #include "ui/faults_panel.h"
@@ -76,6 +78,9 @@ typedef struct {
   SdlInputState input;
   FaultMonitor faults;
   Annunciator ann;
+  RunRecorder recorder;
+  char spec_path[512]; /* engine spec in use; empty = built-in default */
+  int logged_sensor_mode; /* display feed last written to the event log */
   SimClock clock;
   bool logged_paused;   /* clock state last written to the event log */
   int logged_speed_idx;
@@ -118,6 +123,162 @@ static void acknowledge_alarms(AppState *app) {
   annunciator_acknowledge(&app->ann);
   event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ALARM",
                  "alarms acknowledged");
+}
+
+/* File > Load engine spec: the dialog callback may run on another thread, so it
+ * only hands the chosen path over; the main loop picks it up. */
+static SDL_AtomicInt g_spec_pending;
+static char g_spec_path[512];
+
+static void SDLCALL on_spec_chosen(void *userdata, const char *const *filelist,
+                                   int filter) {
+  (void)userdata;
+  (void)filter;
+  if (filelist && filelist[0]) {
+    SDL_strlcpy(g_spec_path, filelist[0], sizeof g_spec_path);
+    SDL_SetAtomicInt(&g_spec_pending, 1);
+  }
+}
+
+#define RECORD_DB_PATH "runs/dashboard.db"
+
+static void engine_start(AppState *app) {
+  const double min_start_soc = 0.05;
+  if (app->state.engine.run_state == ENGINE_STOPPED &&
+      app->state.elec.batt_soc < min_start_soc) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION, "ENGINE",
+                   "battery too weak to start (SOC %.0f%%)",
+                   app->state.elec.batt_soc * 100.0);
+    return;
+  }
+  EngineRunState before = app->state.engine.run_state;
+  engine_model_start(&app->state.engine, &app->sync.engine_config,
+                     app->state.cyl);
+  if (before == ENGINE_STOPPED) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                   "cranking...");
+  }
+}
+
+static void engine_stop(AppState *app) {
+  if (app->state.engine.run_state == ENGINE_RUNNING) {
+    app->engine_stop_requested = true;
+    engine_model_stop(&app->state.engine);
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                   "ignition off");
+  } else if (app->state.engine.run_state == ENGINE_CRANKING) {
+    engine_model_stop(&app->state.engine);
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                   "cranking aborted");
+  }
+}
+
+/* Cold, stopped engine at sea level, with every monitor and trend cleared.
+ * Keeps sync (config, faults, clock), input, sensor and the event log. */
+static void reset_simulation_state(AppState *app) {
+  AtmosphereState atm = environment_isa(0.0);
+  app->ambient_c = atm.temperature_k - 273.15;
+  app->ambient_pressure_kpa = atm.pressure_kpa;
+
+  model_state_init(&app->state, &app->sync.engine_config, app->ambient_c);
+  app->state.engine.run_state = ENGINE_STOPPED;
+  app->state.engine.omega_rad_s = 0.0;
+  app->state.engine.map_kpa = app->ambient_pressure_kpa; /* not being pumped,
+                                                          * so no vacuum */
+  app->display = app->state;
+  app->engine_stop_requested = false;
+
+  fault_monitor_init(&app->faults);
+  annunciator_init(&app->ann);
+  trends_init(&app->trends);
+  cyl_trends_init(&app->cyl_trends);
+  app->sample_accum_s = 0.0;
+
+  event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
+                 "engine off -- press I to start");
+}
+
+static void recording_stop(AppState *app, const char *why) {
+  if (!run_recorder_active(&app->recorder)) {
+    return;
+  }
+  const long rows = app->recorder.rows;
+  /* Sync only uploads "completed" runs, and every way of ending a recording
+   * here is deliberate, so the data is kept. */
+  run_recorder_stop(&app->recorder, "completed");
+  event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "RECORD",
+                 "recording stopped (%s), %ld rows", why, rows);
+}
+
+static void recording_start(AppState *app) {
+  RunLogMeta meta;
+  memset(&meta, 0, sizeof meta);
+  meta.source = "dashboard";
+  meta.profile = NULL;
+  meta.dt = SAMPLE_PERIOD_S;
+  meta.duration_s = 0.0; /* open-ended */
+  meta.load_nm = DEMO_LOAD_NM;
+  meta.seed = 0xC0FFEEu;
+  meta.engine_spec = app->spec_path[0] ? app->spec_path : "default";
+  meta.with_sensor = 1;
+
+  if (run_recorder_start(&app->recorder, RECORD_DB_PATH, &meta,
+                         app->sync.sim_time_s) != 0) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING, "RECORD",
+                   "couldn't start recording into %s", RECORD_DB_PATH);
+    return;
+  }
+  event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "RECORD",
+                 "recording to %s (run %lld)", RECORD_DB_PATH,
+                 (long long)app->recorder.run_id);
+}
+
+/* One row per sampling tick, from the exact model plus a noisy sensor reading. */
+static void record_sample(AppState *app) {
+  SensorReading reading = sensor_read(&app->sensor, &app->state);
+  RunLogSample s = {};
+  s.t = app->sync.sim_time_s;
+  s.throttle = app->input.throttle;
+  s.alt_m = app->input.altitude_m;
+  s.ambient_c = app->state.env.oat_c;
+  s.airspeed_ms = app->input.airspeed_ms;
+  s.cool_index = environment_cool_index(app->state.env.density_kg_m3,
+                                        app->state.env.airspeed_ms,
+                                        app->state.rpm);
+  s.state = &app->state;
+  s.sensor = &reading;
+  run_recorder_write(&app->recorder, &s);
+}
+
+/* Loads `path` (NULL / "" = built-in default engine) and restarts the
+ * simulation with it. Returns false, changing nothing, if the file is bad.
+ * Restarting also clears injected faults and ends any recording. */
+static bool load_engine_spec(AppState *app, const char *path) {
+  ModelSync fresh;
+  model_sync_init(&fresh);
+  if (path && path[0]) {
+    EngineSpecResult r = engine_spec_load(path, &fresh.engine_config);
+    if (r.status == ENGINE_SPEC_ERR_OPEN) {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING,
+                     "CONFIG", "couldn't open engine spec %s", path);
+      return false;
+    }
+    if (r.status != ENGINE_SPEC_OK) {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING,
+                     "CONFIG", "engine spec parse error at line %d -- not loaded",
+                     r.error_line);
+      return false;
+    }
+  }
+
+  recording_stop(app, "simulation restarted");
+  app->sync = fresh;
+  snprintf(app->spec_path, sizeof app->spec_path, "%s", path ? path : "");
+  reset_simulation_state(app);
+  event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "CONFIG",
+                 "engine config: %s",
+                 app->spec_path[0] ? app->spec_path : "built-in default");
+  return true;
 }
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
@@ -177,38 +338,25 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
       return SDL_APP_FAILURE;
     }
   }
+  if (engine_spec_path) {
+    snprintf(app->spec_path, sizeof app->spec_path, "%s", engine_spec_path);
+  }
   SDL_Log("engine config: %s",
           engine_spec_path ? engine_spec_path : "built-in default");
   event_log_push(&app->events, 0.0, EVENT_INFO, "CONFIG", "engine config: %s",
                  engine_spec_path ? engine_spec_path : "built-in default");
 
-  AtmosphereState atm = environment_isa(0.0);
-  app->ambient_c = atm.temperature_k - 273.15;
-  app->ambient_pressure_kpa = atm.pressure_kpa;
-
-  model_state_init(&app->state, &app->sync.engine_config, app->ambient_c);
-
-  app->state.engine.run_state = ENGINE_STOPPED;
-  app->state.engine.omega_rad_s = 0.0;
-  app->state.engine.map_kpa = app->ambient_pressure_kpa; /* not being pumped,
-                                                          * so no vacuum */
-  event_log_push(&app->events, 0.0, EVENT_INFO, "ENGINE",
-                 "engine off -- press I to start");
-
   SensorConfig scfg = sensor_config_default();
   sensor_init(&app->sensor, &scfg, 0xC0FFEEu);
-  app->display = app->state;
   app->sensor_mode = 0;
+  app->logged_sensor_mode = 0;
 
   sdl_input_init(&app->input);
-  fault_monitor_init(&app->faults);
-  annunciator_init(&app->ann);
   sim_clock_init(&app->clock);
   app->logged_paused = app->clock.paused;
   app->logged_speed_idx = app->clock.speed_idx;
-  trends_init(&app->trends);
-  cyl_trends_init(&app->cyl_trends);
-  app->sample_accum_s = 0.0;
+  run_recorder_init(&app->recorder);
+  reset_simulation_state(app);
 
   return SDL_APP_CONTINUE;
 }
@@ -240,8 +388,6 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
       (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
        event->gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)) {
     app->sensor_mode = !app->sensor_mode;
-    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "MODE",
-                   "display feed -> %s", app->sensor_mode ? "sensor" : "model");
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -273,35 +419,12 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
       event->key.key == SDLK_I) {
-    const double min_start_soc = 0.05;
-    if (app->state.engine.run_state == ENGINE_STOPPED &&
-        app->state.elec.batt_soc < min_start_soc) {
-      event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION,
-                     "ENGINE", "battery too weak to start (SOC %.0f%%)",
-                     app->state.elec.batt_soc * 100.0);
-    } else {
-      EngineRunState before = app->state.engine.run_state;
-      engine_model_start(&app->state.engine, &app->sync.engine_config,
-                         app->state.cyl);
-      if (before == ENGINE_STOPPED) {
-        event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
-                       "cranking...");
-      }
-    }
+    engine_start(app);
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
       event->key.key == SDLK_O) {
-    if (app->state.engine.run_state == ENGINE_RUNNING) {
-      app->engine_stop_requested = true;
-      engine_model_stop(&app->state.engine);
-      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
-                     "ignition off");
-    } else if (app->state.engine.run_state == ENGINE_CRANKING) {
-      engine_model_stop(&app->state.engine);
-      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
-                     "cranking aborted");
-    }
+    engine_stop(app);
   }
 
   /* Handle fullscreen */
@@ -332,6 +455,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   SDL_Renderer *renderer = app->window_ctx.renderer;
 
   const float fps = sdl_time_tick(&app->timer);
+
+  if (SDL_GetAtomicInt(&g_spec_pending)) {
+    SDL_SetAtomicInt(&g_spec_pending, 0);
+    load_engine_spec(app, g_spec_path);
+  }
 
   /* Frame delta, clamped so a stall doesn't launch the integrator. */
   double dt = (fps > 0.0f) ? (double)(1.0f / fps) : (1.0 / 60.0);
@@ -391,6 +519,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     fault_monitor_check(&app->faults, &app->events, sampled,
                         app->sync.sim_time_s);
     annunciator_update(&app->ann, sampled);
+    if (run_recorder_active(&app->recorder)) {
+      record_sample(app);
+    }
     app->sample_accum_s -= SAMPLE_PERIOD_S;
   }
 
@@ -420,6 +551,35 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   if (ImGui::BeginMainMenuBar()) {
     if (ImGui::BeginMenu("File")) {
+      const bool recording = run_recorder_active(&app->recorder);
+      if (ImGui::MenuItem(recording ? "Stop recording" : "Start recording")) {
+        if (recording) {
+          recording_stop(app, "stopped by user");
+        } else {
+          recording_start(app);
+        }
+      }
+      if (recording) {
+        ImGui::TextDisabled("  %s  %ld rows", RECORD_DB_PATH,
+                            app->recorder.rows);
+      }
+      ImGui::Separator();
+      if (ImGui::MenuItem("Load engine spec...")) {
+        static const SDL_DialogFileFilter filters[] = {
+            {"Engine spec (*.cfg)", "cfg"}, {"All files", "*"}};
+        SDL_ShowOpenFileDialog(on_spec_chosen, NULL, app->window_ctx.window,
+                               filters, 2, NULL, false);
+      }
+      if (ImGui::MenuItem("Restart simulation")) {
+        load_engine_spec(app, app->spec_path);
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Cold-start the engine. Clears injected faults,\n"
+                          "trends and alarms, and ends any recording.");
+      }
+      ImGui::TextDisabled("  engine: %s",
+                          app->spec_path[0] ? app->spec_path : "built-in default");
+      ImGui::Separator();
       if (ImGui::MenuItem("Quit")) {
         app->quit_requested = true;
       }
@@ -440,6 +600,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (ImGui::BeginMenu("View")) {
       ImGui::MenuItem("Alarms", NULL, &app->panels.alarms);
       ImGui::MenuItem("Sim", NULL, &app->panels.sim);
+      ImGui::MenuItem("Controls", NULL, &app->panels.controls);
       ImGui::MenuItem("Fault Injection", NULL, &app->panels.faults);
       ImGui::MenuItem("Instruments", NULL, &app->panels.instruments);
       ImGui::MenuItem("Environment", NULL, &app->panels.environment);
@@ -452,6 +613,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("ImGui demo", NULL, &app->show_imgui_demo);
       ImGui::MenuItem("ImPlot demo", NULL, &app->show_implot_demo);
       ImGui::EndMenu();
+    }
+    if (run_recorder_active(&app->recorder)) {
+      ImGui::TextColored(ImVec4(0.90f, 0.22f, 0.20f, 1.0f), "  REC %ld",
+                         app->recorder.rows);
     }
     if (!app->panels.alarms) {
       alarm_menu_indicator(&app->ann);
@@ -466,6 +631,16 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   if (app->panels.sim) {
     sim_panel_draw(&app->panels.sim, shown, app->sync.sim_time_s,
                    app->input.throttle, fps, app->sensor_mode != 0, &app->clock);
+  }
+  if (app->panels.controls) {
+    const ControlActions act = controls_panel_draw(
+        &app->panels.controls, &app->input, shown, &app->sensor_mode);
+    if (act.start_engine) {
+      engine_start(app);
+    }
+    if (act.stop_engine) {
+      engine_stop(app);
+    }
   }
   if (app->panels.faults) {
     faults_panel_draw(&app->panels.faults, app->sync.cyl_config,
@@ -508,6 +683,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "SIM",
                    "simulation %s", app->clock.paused ? "paused" : "resumed");
   }
+  if (app->sensor_mode != app->logged_sensor_mode) {
+    app->logged_sensor_mode = app->sensor_mode;
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "MODE",
+                   "display feed -> %s", app->sensor_mode ? "sensor" : "model");
+  }
   if (app->clock.speed_idx != app->logged_speed_idx) {
     app->logged_speed_idx = app->clock.speed_idx;
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "SIM",
@@ -528,6 +708,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   (void)result;
   AppState *app = (AppState *)appstate;
+  recording_stop(app, "application closed");
   sdl_input_shutdown(&app->input);
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();

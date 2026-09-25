@@ -14,6 +14,7 @@ struct PanelVisibility {
   bool cyl_trends;
   bool event_log;
   bool gamepad;
+  bool controls;
   bool faults;
 };
 
