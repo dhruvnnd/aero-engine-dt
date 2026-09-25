@@ -19,6 +19,7 @@ set(ENGINE_CORE_TESTS
   test_electrical
   test_engine_spec_io
   test_event_log
+  test_monitor
   test_crank_thermo
   test_run_log
 )

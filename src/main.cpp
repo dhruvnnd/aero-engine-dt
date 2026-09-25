@@ -18,6 +18,7 @@
 #include "platform/sdl/sdl_time.h"
 #include "platform/sdl/sdl_window.h"
 #include "telemetry/event_log.h"
+#include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
 #include "ui/dashboard.h"
 #include "ui/event_log_panel.h"
@@ -58,6 +59,7 @@ typedef struct {
   int fullscreen;
   SdlInputState input;
   Dashboard dash;
+  FaultMonitor faults;
   EventLog events;
 
   double ambient_c;
@@ -147,6 +149,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
   sdl_input_init(&app->input);
   dashboard_init(&app->dash);
+  fault_monitor_init(&app->faults);
   app->sample_accum_s = 0.0;
 
   return SDL_APP_CONTINUE;
@@ -302,8 +305,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     sensor_read_state(&app->sensor, &app->state, &app->display);
     const ModelState *sampled = app->sensor_mode ? &app->display : &app->state;
     dashboard_sample(&app->dash, sampled);
-    dashboard_check_faults(&app->dash, &app->events, sampled,
-                           app->sync.sim_time_s);
+    fault_monitor_check(&app->faults, &app->events, sampled,
+                        app->sync.sim_time_s);
     app->sample_accum_s -= SAMPLE_PERIOD_S;
   }
 
