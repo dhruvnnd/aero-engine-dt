@@ -7,25 +7,11 @@
 
 static const ChannelRange RANGE_AUTO = {0};
 
-void dashboard_init(Dashboard *d) {
-  d->theme = ui_theme_default();
-  ui_history_init(&d->rpm_hist, d->rpm_buf, DASHBOARD_TREND_CAP);
-  ui_history_init(&d->cht_hist, d->cht_buf, DASHBOARD_TREND_CAP);
-  ui_history_init(&d->egt_hist, d->egt_buf, DASHBOARD_TREND_CAP);
-  ui_history_init(&d->oilp_hist, d->oilp_buf, DASHBOARD_TREND_CAP);
-  ui_history_init(&d->batt_hist, d->batt_buf, DASHBOARD_TREND_CAP);
-}
-
-void dashboard_sample(Dashboard *d, const ModelState *s) {
-  ui_history_push(&d->rpm_hist, s->rpm);
-  ui_history_push(&d->cht_hist, s->thermal.cht_c);
-  ui_history_push(&d->egt_hist, s->thermal.egt_c);
-  ui_history_push(&d->oilp_hist, s->lube.oil_press_kpa);
-  ui_history_push(&d->batt_hist, s->elec.batt_soc * 100.0);
-}
+void dashboard_init(Dashboard *d) { d->theme = ui_theme_default(); }
 
 void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
-                    const ModelState *s, int num_cyl, double throttle,
+                    const ModelState *s, const Trends *trends, int num_cyl,
+                    double throttle,
                     double sim_time_s, float fps, int sensor_mode) {
   const UiTheme *th = &d->theme;
 
@@ -97,19 +83,19 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
 
   /* right column: trends fill the upper part, the subsystem list the rest */
   UiRect subbox;
-  UiRect trends = ui_split_top_frac(right, 0.6f, 8.0f, &subbox);
+  UiRect trendbox = ui_split_top_frac(right, 0.6f, 8.0f, &subbox);
 
-  UiRect tr = ui_panel(r, trends, th, "trends");
+  UiRect tr = ui_panel(r, trendbox, th, "trends");
   UiGrid tg = ui_grid(tr, 1, 5, 6.0f);
-  ui_sparkline(r, ui_grid_at(tg, 0), th, "RPM", "rpm", 0, &d->rpm_hist,
+  ui_sparkline(r, ui_grid_at(tg, 0), th, "RPM", "rpm", 0, &trends->rpm,
                CHANNEL_RANGE_RPM);
-  ui_sparkline(r, ui_grid_at(tg, 1), th, "CHT", "degC", 0, &d->cht_hist,
+  ui_sparkline(r, ui_grid_at(tg, 1), th, "CHT", "degC", 0, &trends->cht,
                RANGE_AUTO);
-  ui_sparkline(r, ui_grid_at(tg, 2), th, "EGT", "degC", 0, &d->egt_hist,
+  ui_sparkline(r, ui_grid_at(tg, 2), th, "EGT", "degC", 0, &trends->egt,
                RANGE_AUTO);
-  ui_sparkline(r, ui_grid_at(tg, 3), th, "OIL P", "kPa", 0, &d->oilp_hist,
+  ui_sparkline(r, ui_grid_at(tg, 3), th, "OIL P", "kPa", 0, &trends->oil_press,
                CHANNEL_RANGE_OIL_PRESS);
-  ui_sparkline(r, ui_grid_at(tg, 4), th, "BATT", "%", 0, &d->batt_hist,
+  ui_sparkline(r, ui_grid_at(tg, 4), th, "BATT", "%", 0, &trends->batt_pct,
                RANGE_AUTO);
 
   /* left column bottom: per-cylinder comparison bars */

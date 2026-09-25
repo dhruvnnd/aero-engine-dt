@@ -20,6 +20,8 @@ set(ENGINE_CORE_TESTS
   test_engine_spec_io
   test_event_log
   test_monitor
+  test_history
+  test_trends
   test_crank_thermo
   test_run_log
 )
@@ -35,16 +37,14 @@ foreach(test_name IN LISTS ENGINE_CORE_TESTS)
 endforeach()
 
 # ---------------------------------------------------------------------------
-# UI tests -- the SDL-free pieces of src/ui (layout math, history ring). Each
+# UI tests -- the SDL-free pieces of src/ui (layout math). Each
 # compiles its one dependency directly rather than linking a library; there is
 # no ui_core target and these sources pull in no SDL.
 # ---------------------------------------------------------------------------
 set(UI_TESTS
   test_ui_layout
-  test_ui_history
 )
 set(test_ui_layout_SRC  ${CMAKE_SOURCE_DIR}/src/ui/ui_layout.c)
-set(test_ui_history_SRC ${CMAKE_SOURCE_DIR}/src/ui/ui_history.c)
 
 foreach(test_name IN LISTS UI_TESTS)
   add_executable(${test_name} ${test_name}.c ${${test_name}_SRC})

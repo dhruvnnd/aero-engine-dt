@@ -138,17 +138,17 @@ void ui_bar_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
 
 void ui_sparkline(SDL_Renderer *r, UiRect b, const UiTheme *th,
                   const char *label, const char *unit, int precision,
-                  const UiHistory *hist, ChannelRange range) {
+                  const History *hist, ChannelRange range) {
   if (!ui_rect_valid(b)) {
     return;
   }
   UiRect plot;
   UiRect top = ui_split_top(b, kGlyph, 3.0f, &plot);
 
-  int n = ui_history_count(hist);
+  int n = history_count(hist);
   ui_text(r, top.x, top.y, th->text_dim, "%s", label);
   ui_text_right(r, top.x + top.w, top.y, th->text, "%.*f %s", precision,
-                ui_history_last(hist), unit != NULL ? unit : "");
+                history_last(hist), unit != NULL ? unit : "");
 
   ui_box(r, plot, th->frame);
   UiRect pin = ui_rect_inset(plot, 2.0f, 2.0f);
@@ -162,8 +162,8 @@ void ui_sparkline(SDL_Renderer *r, UiRect b, const UiTheme *th,
     vmin = range.lo;
     vmax = range.hi;
   } else {
-    vmin = ui_history_min(hist);
-    vmax = ui_history_max(hist);
+    vmin = history_min(hist);
+    vmax = history_max(hist);
     if (vmax - vmin < 1e-9) {
       vmax = vmin + 1.0;
     }
@@ -180,7 +180,7 @@ void ui_sparkline(SDL_Renderer *r, UiRect b, const UiTheme *th,
   int start = n - m;
   SDL_FPoint pts[UI_SPARK_MAX];
   for (int i = 0; i < m; i++) {
-    double v = ui_history_at(hist, start + i);
+    double v = history_at(hist, start + i);
     float x = pin.x + (m == 1 ? 0.0f : (float)i / (float)(m - 1) * plot_w);
     float y = (float)ui_map(v, vmin, vmax, (double)(pin.y + pin.h - 1.0f),
                             (double)pin.y);

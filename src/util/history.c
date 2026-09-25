@@ -1,20 +1,20 @@
-#include "ui/ui_history.h"
+#include "util/history.h"
 
 #include <stddef.h>
 
-void ui_history_init(UiHistory *h, double *storage, int cap) {
+void history_init(History *h, double *storage, int cap) {
   h->buf = storage;
   h->cap = cap < 0 ? 0 : cap;
   h->count = 0;
   h->head = 0;
 }
 
-void ui_history_clear(UiHistory *h) {
+void history_clear(History *h) {
   h->count = 0;
   h->head = 0;
 }
 
-void ui_history_push(UiHistory *h, double value) {
+void history_push(History *h, double value) {
   if (h->buf == NULL || h->cap == 0) {
     return;
   }
@@ -27,29 +27,29 @@ void ui_history_push(UiHistory *h, double value) {
   }
 }
 
-int ui_history_count(const UiHistory *h) { return h->count; }
+int history_count(const History *h) { return h->count; }
 
-double ui_history_at(const UiHistory *h, int i) {
+double history_at(const History *h, int i) {
   if (i < 0 || i >= h->count) {
     return 0.0;
   }
   return h->buf[(h->head + i) % h->cap];
 }
 
-double ui_history_last(const UiHistory *h) {
+double history_last(const History *h) {
   if (h->count == 0) {
     return 0.0;
   }
-  return ui_history_at(h, h->count - 1);
+  return history_at(h, h->count - 1);
 }
 
-double ui_history_min(const UiHistory *h) {
+double history_min(const History *h) {
   if (h->count == 0) {
     return 0.0;
   }
-  double m = ui_history_at(h, 0);
+  double m = history_at(h, 0);
   for (int i = 1; i < h->count; i++) {
-    double v = ui_history_at(h, i);
+    double v = history_at(h, i);
     if (v < m) {
       m = v;
     }
@@ -57,13 +57,13 @@ double ui_history_min(const UiHistory *h) {
   return m;
 }
 
-double ui_history_max(const UiHistory *h) {
+double history_max(const History *h) {
   if (h->count == 0) {
     return 0.0;
   }
-  double m = ui_history_at(h, 0);
+  double m = history_at(h, 0);
   for (int i = 1; i < h->count; i++) {
-    double v = ui_history_at(h, i);
+    double v = history_at(h, i);
     if (v > m) {
       m = v;
     }
