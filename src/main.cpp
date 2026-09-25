@@ -18,18 +18,21 @@
 #include "platform/sdl/sdl_input.h"
 #include "platform/sdl/sdl_time.h"
 #include "platform/sdl/sdl_window.h"
+#include "telemetry/annunciator.h"
 #include "telemetry/event_log.h"
 #include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
 #include "telemetry/trends.h"
+#include "ui/alarm_strip.h"
 #include "ui/event_log_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/layouts.h"
 #include "ui/readout_panels.h"
 #include "ui/trends_panel.h"
 
-#define WIN_W 1000
-#define WIN_H 680
+/* Initial window size; shrunk to fit the display if it is too big. */
+#define WIN_W 1680
+#define WIN_H 1000
 
 /* ImGui size multiplier */
 #define UI_ZOOM 1.2f
@@ -68,6 +71,7 @@ typedef struct {
   int fullscreen;
   SdlInputState input;
   FaultMonitor faults;
+  Annunciator ann;
   Trends trends;
   EventLog events;
 
@@ -79,6 +83,34 @@ typedef struct {
 } AppState;
 
 static AppState g_app_state;
+
+/* Shrinks the window if it doesn't fit the display it opened on, then centres
+ * it, so the large default size still works on smaller screens. */
+static void fit_window_to_display(SDL_Window *window) {
+  SDL_Rect usable;
+  if (SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(window), &usable)) {
+    int w = 0;
+    int h = 0;
+    SDL_GetWindowSize(window, &w, &h);
+    const int max_w = usable.w * 92 / 100;
+    const int max_h = usable.h * 92 / 100;
+    if (w > max_w || h > max_h) {
+      SDL_SetWindowSize(window, w > max_w ? max_w : w, h > max_h ? max_h : h);
+    }
+  }
+  SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED,
+                        SDL_WINDOWPOS_CENTERED);
+}
+
+static void acknowledge_alarms(AppState *app) {
+  if (annunciator_unacked(&app->ann, CHANNEL_WARN) == 0 &&
+      annunciator_unacked(&app->ann, CHANNEL_ALERT) == 0) {
+    return;
+  }
+  annunciator_acknowledge(&app->ann);
+  event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ALARM",
+                 "alarms acknowledged");
+}
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   const char *engine_spec_path = NULL;
@@ -95,6 +127,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                        WIN_H)) {
     return SDL_APP_FAILURE;
   }
+  fit_window_to_display(app->window_ctx.window);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -161,6 +194,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
   sdl_input_init(&app->input);
   fault_monitor_init(&app->faults);
+  annunciator_init(&app->ann);
   trends_init(&app->trends);
   app->sample_accum_s = 0.0;
 
@@ -208,6 +242,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
       event->key.key == SDLK_L) {
     app->panels.event_log = !app->panels.event_log;
+  }
+
+  if ((event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+       event->key.key == SDLK_SPACE) ||
+      (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+       event->gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)) {
+    acknowledge_alarms(app);
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -319,6 +360,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     trends_sample(&app->trends, sampled);
     fault_monitor_check(&app->faults, &app->events, sampled,
                         app->sync.sim_time_s);
+    annunciator_update(&app->ann, sampled);
     app->sample_accum_s -= SAMPLE_PERIOD_S;
   }
 
@@ -366,6 +408,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
+      ImGui::MenuItem("Alarms", NULL, &app->panels.alarms);
       ImGui::MenuItem("Sim", NULL, &app->panels.sim);
       ImGui::MenuItem("Instruments", NULL, &app->panels.instruments);
       ImGui::MenuItem("Environment", NULL, &app->panels.environment);
@@ -378,7 +421,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("ImPlot demo", NULL, &app->show_implot_demo);
       ImGui::EndMenu();
     }
+    if (!app->panels.alarms) {
+      alarm_menu_indicator(&app->ann);
+    }
     ImGui::EndMainMenuBar();
+  }
+
+  if (app->panels.alarms && alarm_strip_draw(&app->panels.alarms, &app->ann)) {
+    acknowledge_alarms(app);
   }
 
   if (app->panels.sim) {

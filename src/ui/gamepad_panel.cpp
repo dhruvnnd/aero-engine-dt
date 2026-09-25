@@ -23,6 +23,7 @@ static const char *const BIND_ROWS[][3] = {
     {"D-PAD RIGHT", "OAT offset up", "="},
     {"D-PAD LEFT", "OAT offset down", "-"},
     {"BACK", "reset flight condition", "R"},
+    {"A / SOUTH", "acknowledge alarms", "Space"},
 };
 
 static double axis_unit(SDL_Gamepad *pad, SDL_GamepadAxis axis) {

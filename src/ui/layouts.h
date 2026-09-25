@@ -5,6 +5,7 @@
 
 /* Which dockable panels are open. */
 struct PanelVisibility {
+  bool alarms;
   bool sim;
   bool instruments;
   bool environment;

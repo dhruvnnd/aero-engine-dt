@@ -20,6 +20,7 @@ set(ENGINE_CORE_TESTS
   test_engine_spec_io
   test_event_log
   test_monitor
+  test_annunciator
   test_history
   test_trends
   test_crank_thermo

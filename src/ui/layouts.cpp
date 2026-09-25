@@ -37,6 +37,7 @@ PanelVisibility layout_visibility(int id) {
         v.event_log = true;
     break;
   }
+  v.alarms = true; /* thin bar along the bottom; closable, movable */
   return v;
 }
 
@@ -75,6 +76,10 @@ void layout_apply(int id, ImVec2 size) {
   ImGui::DockBuilderSetNodeSize(root, size);
 
   ImGuiID rest = root;
+  const float strip_px = ImGui::GetFrameHeight() * 2.7f;
+  const ImGuiID alarms = carve(rest, ImGuiDir_Down, strip_px / size.y);
+  DOCK(alarms, PANEL_ALARMS);
+
   switch (id) {
   case LAYOUT_TRENDS: {
     /* big trends on the left; instruments over a tab group on the right */

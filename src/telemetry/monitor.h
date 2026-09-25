@@ -44,6 +44,25 @@ extern const ChannelRange CHANNEL_RANGE_LAMBDA;
  * (the underspeed limit is meaningless then). */
 ChannelStatus channel_rpm_status(double rpm);
 
+/* The channels that are limit-monitored (fault log, alarm strip). */
+typedef enum {
+  MON_RPM = 0,
+  MON_CHT,
+  MON_EGT,
+  MON_OIL_TEMP,
+  MON_OIL_PRESS,
+  MON_FUEL_PRESS,
+  MON_BUS_V,
+  MON_BATT_SOC,
+  MON_CHANNELS
+} MonitorChannel;
+
+/* Short display caption, e.g. "OIL P". */
+const char *monitor_channel_name(MonitorChannel ch);
+
+/* Classify every monitored channel of `s` against its limits. */
+void monitor_classify(const ModelState *s, ChannelStatus out[MON_CHANNELS]);
+
 /* Remembers each channel's last status so check() logs only transitions. */
 typedef struct {
   ChannelStatus prev_rpm, prev_cht, prev_egt, prev_oil_temp, prev_oil_press,
