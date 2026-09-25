@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "imgui.h"
+#include "ui/panel_names.h"
 #include "telemetry/monitor.h"
 
 static const ImVec4 COL_CAUTION(1.00f, 0.75f, 0.20f, 1.0f);
@@ -123,7 +124,7 @@ static void instrument_row(const char *label, double v, double disp_scale,
 
 void instruments_panel_draw(bool *open, const ModelState *s) {
   ImGui::SetNextWindowSize(ImVec2(560.0f, 520.0f), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Instruments", open)) {
+  if (!ImGui::Begin(PANEL_INSTRUMENTS, open)) {
     ImGui::End();
     return;
   }
@@ -193,7 +194,7 @@ static void reading_row(const char *label, double v, const char *unit,
 
 void environment_panel_draw(bool *open, const ModelState *s) {
   ImGui::SetNextWindowSize(ImVec2(320.0f, 170.0f), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Environment", open)) {
+  if (!ImGui::Begin(PANEL_ENVIRONMENT, open)) {
     ImGui::End();
     return;
   }
@@ -223,7 +224,7 @@ static void number_cell(int col, ChannelStatus st, int precision, double v) {
 
 void cylinders_panel_draw(bool *open, const ModelState *s, int num_cyl) {
   ImGui::SetNextWindowSize(ImVec2(420.0f, 260.0f), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Cylinders", open)) {
+  if (!ImGui::Begin(PANEL_CYLINDERS, open)) {
     ImGui::End();
     return;
   }
@@ -291,7 +292,7 @@ static const char *run_state_name(EngineRunState st) {
 void sim_panel_draw(bool *open, const ModelState *s, double sim_time_s,
                     double throttle, float fps, bool sensor_mode) {
   ImGui::SetNextWindowSize(ImVec2(360.0f, 300.0f), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Sim", open)) {
+  if (!ImGui::Begin(PANEL_SIM, open)) {
     ImGui::End();
     return;
   }

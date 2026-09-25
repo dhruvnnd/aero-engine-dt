@@ -24,6 +24,7 @@
 #include "telemetry/trends.h"
 #include "ui/event_log_panel.h"
 #include "ui/gamepad_panel.h"
+#include "ui/layouts.h"
 #include "ui/readout_panels.h"
 #include "ui/trends_panel.h"
 
@@ -50,13 +51,10 @@
 
 typedef struct {
   SdlWindowContext window_ctx;
-  bool show_gamepad;   /* ImGui gamepad window open/closed */
-  bool show_event_log; /* ImGui event log window open/closed */
-  bool show_sim;
-  bool show_instruments;
-  bool show_environment;
-  bool show_cylinders;
-  bool show_trends;
+  PanelVisibility panels; /* which dockable panels are open */
+  int layout_current;     /* LAYOUT_* last applied */
+  int layout_pending;     /* LAYOUT_* to apply next frame, or -1 */
+  bool layout_checked;    /* first-frame default-layout check done */
   bool show_implot_demo;
   bool show_imgui_demo;
   bool quit_requested;
@@ -104,9 +102,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   ImGuiIO &io = ImGui::GetIO();
   /* No ImGuiConfigFlags_NavEnableKeyboard: with it, ImGui claims the keyboard
    * whenever any panel is focused, which swallows the sim hotkeys. */
-#ifdef IMGUI_HAS_DOCK
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-#endif
   io.IniFilename = "aero_engine_dt_imgui.ini";
   ImGui::StyleColorsDark();
   const float ui_scale =
@@ -117,13 +113,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
                                     app->window_ctx.renderer);
   ImGui_ImplSDLRenderer3_Init(app->window_ctx.renderer);
 
-  app->show_gamepad = false; /* G toggles it */
-  app->show_event_log = true; /* L toggles it */
-  app->show_sim = true;
-  app->show_instruments = true;
-  app->show_environment = true;
-  app->show_cylinders = true;
-  app->show_trends = true;
+  app->layout_current = LAYOUT_OVERVIEW;
+  app->layout_pending = -1;
+  app->panels = layout_visibility(LAYOUT_OVERVIEW);
   app->show_implot_demo = false;
   app->show_imgui_demo = false;
 
@@ -208,14 +200,14 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
       event->key.key == SDLK_G) {
-    app->show_gamepad = !app->show_gamepad;
+    app->panels.gamepad = !app->panels.gamepad;
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "PANEL",
-                   "gamepad panel %s", app->show_gamepad ? "shown" : "hidden");
+                   "gamepad panel %s", app->panels.gamepad ? "shown" : "hidden");
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
       event->key.key == SDLK_L) {
-    app->show_event_log = !app->show_event_log;
+    app->panels.event_log = !app->panels.event_log;
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -335,10 +327,25 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   ImGui_ImplSDLRenderer3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
-#ifdef IMGUI_HAS_DOCK
-  ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
-                               ImGuiDockNodeFlags_PassthruCentralNode);
-#endif
+
+  /* Settings (and any saved dock tree) are loaded by now. With none for our
+   * dockspace -- first run, or an old .ini -- start from the default layout. */
+  if (!app->layout_checked) {
+    app->layout_checked = true;
+    if (!layout_dockspace_exists()) {
+      app->layout_pending = LAYOUT_OVERVIEW;
+    }
+  }
+  /* Rebuilding must happen before the dockspace is submitted this frame. */
+  if (app->layout_pending >= 0) {
+    layout_apply(app->layout_pending, ImGui::GetMainViewport()->WorkSize);
+    app->panels = layout_visibility(app->layout_pending);
+    app->layout_current = app->layout_pending;
+    app->layout_pending = -1;
+  }
+  ImGui::DockSpaceOverViewport(layout_dockspace_id(), ImGui::GetMainViewport(),
+                               ImGuiDockNodeFlags_None);
+
   if (ImGui::BeginMainMenuBar()) {
     if (ImGui::BeginMenu("File")) {
       if (ImGui::MenuItem("Quit")) {
@@ -346,14 +353,26 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       }
       ImGui::EndMenu();
     }
+    if (ImGui::BeginMenu("Layout")) {
+      for (int i = 0; i < LAYOUT_COUNT; i++) {
+        if (ImGui::MenuItem(layout_name(i), NULL, app->layout_current == i)) {
+          app->layout_pending = i;
+        }
+      }
+      ImGui::Separator();
+      if (ImGui::MenuItem("Reset current layout")) {
+        app->layout_pending = app->layout_current;
+      }
+      ImGui::EndMenu();
+    }
     if (ImGui::BeginMenu("View")) {
-      ImGui::MenuItem("Sim", NULL, &app->show_sim);
-      ImGui::MenuItem("Instruments", NULL, &app->show_instruments);
-      ImGui::MenuItem("Environment", NULL, &app->show_environment);
-      ImGui::MenuItem("Cylinders", NULL, &app->show_cylinders);
-      ImGui::MenuItem("Trends", NULL, &app->show_trends);
-      ImGui::MenuItem("Event Log", "L", &app->show_event_log);
-      ImGui::MenuItem("Gamepad", "G", &app->show_gamepad);
+      ImGui::MenuItem("Sim", NULL, &app->panels.sim);
+      ImGui::MenuItem("Instruments", NULL, &app->panels.instruments);
+      ImGui::MenuItem("Environment", NULL, &app->panels.environment);
+      ImGui::MenuItem("Cylinders", NULL, &app->panels.cylinders);
+      ImGui::MenuItem("Trends", NULL, &app->panels.trends);
+      ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
+      ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
       ImGui::Separator();
       ImGui::MenuItem("ImGui demo", NULL, &app->show_imgui_demo);
       ImGui::MenuItem("ImPlot demo", NULL, &app->show_implot_demo);
@@ -362,28 +381,28 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     ImGui::EndMainMenuBar();
   }
 
-  if (app->show_sim) {
-    sim_panel_draw(&app->show_sim, shown, app->sync.sim_time_s,
+  if (app->panels.sim) {
+    sim_panel_draw(&app->panels.sim, shown, app->sync.sim_time_s,
                    app->input.throttle, fps, app->sensor_mode != 0);
   }
-  if (app->show_instruments) {
-    instruments_panel_draw(&app->show_instruments, shown);
+  if (app->panels.instruments) {
+    instruments_panel_draw(&app->panels.instruments, shown);
   }
-  if (app->show_environment) {
-    environment_panel_draw(&app->show_environment, shown);
+  if (app->panels.environment) {
+    environment_panel_draw(&app->panels.environment, shown);
   }
-  if (app->show_cylinders) {
-    cylinders_panel_draw(&app->show_cylinders, shown,
+  if (app->panels.cylinders) {
+    cylinders_panel_draw(&app->panels.cylinders, shown,
                          app->sync.engine_config.num_cylinders);
   }
-  if (app->show_trends) {
-    trends_panel_draw(&app->show_trends, &app->trends, SAMPLE_PERIOD_S);
+  if (app->panels.trends) {
+    trends_panel_draw(&app->panels.trends, &app->trends, SAMPLE_PERIOD_S);
   }
-  if (app->show_event_log) {
-    event_log_panel_draw(&app->show_event_log, &app->events);
+  if (app->panels.event_log) {
+    event_log_panel_draw(&app->panels.event_log, &app->events);
   }
-  if (app->show_gamepad) {
-    gamepad_panel_draw(&app->show_gamepad, &app->input);
+  if (app->panels.gamepad) {
+    gamepad_panel_draw(&app->panels.gamepad, &app->input);
   }
   if (app->show_imgui_demo) {
     ImGui::ShowDemoWindow(&app->show_imgui_demo);

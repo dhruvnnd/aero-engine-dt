@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "imgui.h"
+#include "ui/panel_names.h"
 
 /* control, action, keyboard equivalent. */
 static const char *const BIND_ROWS[][3] = {
@@ -85,7 +86,7 @@ static void reading_row(const char *label, double v, const char *unit,
 
 void gamepad_panel_draw(bool *open, const SdlInputState *input) {
   ImGui::SetNextWindowSize(ImVec2(460.0f, 640.0f), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Gamepad / Input Map", open)) {
+  if (!ImGui::Begin(PANEL_GAMEPAD, open)) {
     ImGui::End();
     return;
   }
