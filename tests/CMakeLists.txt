@@ -21,6 +21,7 @@ set(ENGINE_CORE_TESTS
   test_event_log
   test_monitor
   test_annunciator
+  test_sim_clock
   test_history
   test_trends
   test_crank_thermo

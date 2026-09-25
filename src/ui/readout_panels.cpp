@@ -290,7 +290,8 @@ static const char *run_state_name(EngineRunState st) {
 }
 
 void sim_panel_draw(bool *open, const ModelState *s, double sim_time_s,
-                    double throttle, float fps, bool sensor_mode) {
+                    double throttle, float fps, bool sensor_mode,
+                    SimClock *clock) {
   ImGui::SetNextWindowSize(ImVec2(360.0f, 300.0f), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin(PANEL_SIM, open)) {
     ImGui::End();
@@ -324,6 +325,37 @@ void sim_panel_draw(bool *open, const ModelState *s, double sim_time_s,
   ImGui::SameLine();
   ImGui::ProgressBar((float)throttle, ImVec2(-FLT_MIN, 0.0f), overlay);
 
+  ImGui::Separator();
+  ImGui::TextDisabled("sim clock");
+  ImGui::SameLine();
+  if (clock->paused) {
+    ImGui::TextColored(COL_CAUTION, "PAUSED");
+  } else {
+    ImGui::Text("running  %.2gx", sim_clock_speed(clock));
+  }
+  if (ImGui::Button(clock->paused ? "Resume" : "Pause")) {
+    clock->paused = !clock->paused;
+  }
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!clock->paused);
+  if (ImGui::Button("Step")) {
+    sim_clock_request_step(clock);
+  }
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("advance %.2f s (while paused)", SIM_CLOCK_STEP_S);
+  }
+  for (int i = 0; i < SIM_CLOCK_NUM_SPEEDS; i++) {
+    char label[16];
+    snprintf(label, sizeof label, "%.2gx", SIM_CLOCK_SPEEDS[i]);
+    if (i > 0) {
+      ImGui::SameLine();
+    }
+    if (ImGui::RadioButton(label, clock->speed_idx == i)) {
+      sim_clock_set_speed(clock, i);
+    }
+  }
+
   if (ImGui::CollapsingHeader("Keys", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::TextDisabled("UP/DN or W/S   throttle");
     ImGui::TextDisabled("PGUP/DN        altitude");
@@ -332,6 +364,7 @@ void sim_panel_draw(bool *open, const ModelState *s, double sim_time_s,
     ImGui::TextDisabled("R              reset flight condition");
     ImGui::TextDisabled("I / O          start / stop engine");
     ImGui::TextDisabled("M              sensor / model feed");
+    ImGui::TextDisabled("P / .          pause / step sim");
     ImGui::TextDisabled("G / L          gamepad panel / event log");
     ImGui::TextDisabled("F              fullscreen");
     ImGui::TextDisabled("SPACE          acknowledge alarms");

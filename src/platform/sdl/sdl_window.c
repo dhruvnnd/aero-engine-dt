@@ -15,6 +15,11 @@ bool sdl_window_init(SdlWindowContext *ctx, const char *title, int width,
     return false;
   }
 
+  /* Pace the loop to the display instead of spinning a core flat out. */
+  if (!SDL_SetRenderVSync(ctx->renderer, 1)) {
+    SDL_Log("vsync unavailable: %s", SDL_GetError());
+  }
+
   return true;
 }
 
