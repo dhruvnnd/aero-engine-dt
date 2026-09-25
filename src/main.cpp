@@ -22,7 +22,6 @@
 #include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
 #include "telemetry/trends.h"
-#include "ui/dashboard.h"
 #include "ui/event_log_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/readout_panels.h"
@@ -59,19 +58,17 @@ typedef struct {
   bool show_cylinders;
   bool show_trends;
   bool show_implot_demo;
-  bool show_legacy_dashboard; /* old hand-drawn screen, until ImPlot trends */
   bool show_imgui_demo;
   bool quit_requested;
   SdlFrameTimer timer;
 
   ModelSync sync;
   ModelState state;   /* exact model / twin state */
-  ModelState display; /* noisy instrument feed the dashboard renders */
+  ModelState display; /* noisy instrument feed the panels can show */
   Sensor sensor;
   int sensor_mode; /* 1 = show the noisy feed, 0 = show raw model state */
   int fullscreen;
   SdlInputState input;
-  Dashboard dash;
   FaultMonitor faults;
   Trends trends;
   EventLog events;
@@ -105,7 +102,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   ImGui::CreateContext();
   ImPlot::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  /* No ImGuiConfigFlags_NavEnableKeyboard: with it, ImGui claims the keyboard
+   * whenever any panel is focused, which swallows the sim hotkeys. */
 #ifdef IMGUI_HAS_DOCK
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 #endif
@@ -127,7 +125,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   app->show_cylinders = true;
   app->show_trends = true;
   app->show_implot_demo = false;
-  app->show_legacy_dashboard = true;
   app->show_imgui_demo = false;
 
   event_log_init(&app->events);
@@ -171,7 +168,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   app->sensor_mode = 0;
 
   sdl_input_init(&app->input);
-  dashboard_init(&app->dash);
   fault_monitor_init(&app->faults);
   trends_init(&app->trends);
   app->sample_accum_s = 0.0;
@@ -359,7 +355,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("Event Log", "L", &app->show_event_log);
       ImGui::MenuItem("Gamepad", "G", &app->show_gamepad);
       ImGui::Separator();
-      ImGui::MenuItem("Legacy dashboard", NULL, &app->show_legacy_dashboard);
       ImGui::MenuItem("ImGui demo", NULL, &app->show_imgui_demo);
       ImGui::MenuItem("ImPlot demo", NULL, &app->show_implot_demo);
       ImGui::EndMenu();
@@ -401,19 +396,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   SDL_SetRenderDrawColor(renderer, 10, 14, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
-  if (app->show_legacy_dashboard) {
-    dashboard_draw(&app->dash, renderer, (float)WIN_W, (float)WIN_H, shown,
-                   &app->trends, app->sync.engine_config.num_cylinders,
-                   app->input.throttle, app->sync.sim_time_s, fps,
-                   app->sensor_mode);
-  }
-
-  /* disable logical presentation just for imgui */
-  SDL_SetRenderLogicalPresentation(renderer, 0, 0,
-                                   SDL_LOGICAL_PRESENTATION_DISABLED);
   ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
-  SDL_SetRenderLogicalPresentation(renderer, WIN_W, WIN_H,
-                                   SDL_LOGICAL_PRESENTATION_LETTERBOX);
   SDL_RenderPresent(renderer);
 
   return app->quit_requested ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;

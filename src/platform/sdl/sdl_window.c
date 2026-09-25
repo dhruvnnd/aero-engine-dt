@@ -15,9 +15,6 @@ bool sdl_window_init(SdlWindowContext *ctx, const char *title, int width,
     return false;
   }
 
-  SDL_SetRenderLogicalPresentation(ctx->renderer, width, height,
-                                   SDL_LOGICAL_PRESENTATION_LETTERBOX);
-
   return true;
 }
 
