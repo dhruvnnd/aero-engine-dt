@@ -5,89 +5,7 @@
 #include "ui/ui_layout.h"
 #include "ui/ui_widgets.h"
 
-/* Placeholder limits for the demo engine -- not from a spec sheet. lo/hi frame
- * the gauge track; *_hi thresholds trip on the way up, *_lo on the way down. */
-
-static const UiRange RANGE_RPM = {.lo = 0.0,
-                                  .hi = 3200.0,
-                                  .warn_lo = 500.0,  /* idle underspeed */
-                                  .alert_lo = 300.0, /* near flame-out */
-                                  .warn_hi = 2900.0,
-                                  .alert_hi = 3050.0,
-                                  .has_warn_lo = 1,
-                                  .has_alert_lo = 1,
-                                  .has_warn_hi = 1,
-                                  .has_alert_hi = 1};
-static const UiRange RANGE_CHT = {.lo = 0.0,
-                                  .hi = 260.0,
-                                  .warn_hi = 210.0,
-                                  .alert_hi = 240.0,
-                                  .has_warn_hi = 1,
-                                  .has_alert_hi = 1};
-static const UiRange RANGE_EGT = {.lo = 0.0,
-                                  .hi = 900.0,
-                                  .warn_hi = 780.0,
-                                  .alert_hi = 850.0,
-                                  .has_warn_hi = 1,
-                                  .has_alert_hi = 1};
-static const UiRange RANGE_OIL = {.lo = 0.0,
-                                  .hi = 140.0,
-                                  .warn_hi = 110.0,
-                                  .alert_hi = 125.0,
-                                  .has_warn_hi = 1,
-                                  .has_alert_hi = 1};
-
-/* Fuel supply pressure: both-sided -- a drop below minimum is the real fault */
-static const UiRange RANGE_FUEL_PRESS = {.lo = 0.0,
-                                         .hi = 400.0,
-                                         .warn_lo = 250.0,
-                                         .alert_lo = 200.0,
-                                         .warn_hi = 360.0,
-                                         .has_warn_lo = 1,
-                                         .has_alert_lo = 1,
-                                         .has_warn_hi = 1};
-static const UiRange RANGE_OIL_PRESS = {.lo = 0.0,
-                                        .hi = 800.0,
-                                        .warn_lo = 150.0,
-                                        .alert_lo = 120.0,
-                                        .warn_hi = 600.0,
-                                        .alert_hi = 620.0,
-                                        .has_warn_lo = 1,
-                                        .has_alert_lo = 1,
-                                        .has_warn_hi = 1};
-/* Main bus voltage: both-sided. A sag means the alternator isn't carrying
- * the load; a spike means the regulator is overcharging. */
-static const UiRange RANGE_BUS_V = {.lo = 10.0,
-                                    .hi = 16.0,
-                                    .warn_lo = 12.8,
-                                    .alert_lo = 11.8,
-                                    .warn_hi = 14.9,
-                                    .alert_hi = 15.4,
-                                    .has_warn_lo = 1,
-                                    .has_alert_lo = 1,
-                                    .has_warn_hi = 1,
-                                    .has_alert_hi = 1};
-/* Battery state of charge: one-sided -- how much reserve is left. */
-static const UiRange RANGE_BATT_SOC = {.lo = 0.0,
-                                       .hi = 1.0,
-                                       .warn_lo = 0.35,
-                                       .alert_lo = 0.18,
-                                       .has_warn_lo = 1,
-                                       .has_alert_lo = 1};
-
-/* Air-fuel equivalence ratio, 1.0 = stoichiometric. Lean (>1) or rich (<1)
- * both flag; ~1.55 lean is the misfire edge. */
-static const UiRange RANGE_LAMBDA = {.lo = 0.70,
-                                     .hi = 1.70,
-                                     .warn_lo = 0.90,
-                                     .alert_lo = 0.80,
-                                     .warn_hi = 1.10,
-                                     .alert_hi = 1.55,
-                                     .has_warn_lo = 1,
-                                     .has_alert_lo = 1,
-                                     .has_warn_hi = 1,
-                                     .has_alert_hi = 1};
-static const UiRange RANGE_AUTO = {0};
+static const ChannelRange RANGE_AUTO = {0};
 
 void dashboard_init(Dashboard *d) {
   d->theme = ui_theme_default();
@@ -96,71 +14,6 @@ void dashboard_init(Dashboard *d) {
   ui_history_init(&d->egt_hist, d->egt_buf, DASHBOARD_TREND_CAP);
   ui_history_init(&d->oilp_hist, d->oilp_buf, DASHBOARD_TREND_CAP);
   ui_history_init(&d->batt_hist, d->batt_buf, DASHBOARD_TREND_CAP);
-
-  d->prev_rpm = UI_STALE;
-  d->prev_cht = UI_STALE;
-  d->prev_egt = UI_STALE;
-  d->prev_oil_temp = UI_STALE;
-  d->prev_oil_press = UI_STALE;
-  d->prev_fuel_press = UI_STALE;
-  d->prev_bus_v = UI_STALE;
-  d->prev_batt_soc = UI_STALE;
-}
-
-static const char *status_word(UiStatus s) {
-  switch (s) {
-  case UI_OK:
-    return "NOMINAL";
-  case UI_WARN:
-    return "CAUTION";
-  case UI_ALERT:
-    return "WARNING";
-  case UI_STALE:
-  default:
-    return "NO DATA";
-  }
-}
-
-static void check_channel(EventLog *log, double sim_time_s, UiStatus *prev,
-                          UiStatus cur, const char *name, const char *category,
-                          double value, const char *unit, int precision) {
-  if (cur == *prev) {
-    return;
-  }
-  EventLevel lvl = (cur == UI_ALERT)  ? EVENT_WARNING
-                   : (cur == UI_WARN) ? EVENT_CAUTION
-                                      : EVENT_INFO;
-  event_log_push(log, sim_time_s, lvl, category, "%s %s -> %s (%.*f %s)", name,
-                 status_word(*prev), status_word(cur), precision, value, unit);
-  *prev = cur;
-}
-
-void dashboard_check_faults(Dashboard *d, EventLog *log, const ModelState *s,
-                            double sim_time_s) {
-  check_channel(log, sim_time_s, &d->prev_rpm,
-                s->rpm > 300.0 ? ui_status_for(s->rpm, RANGE_RPM) : UI_STALE,
-                "revs per minute", "RPM", s->rpm, "rpm", 0);
-  check_channel(log, sim_time_s, &d->prev_cht,
-                ui_status_for(s->thermal.cht_c, RANGE_CHT),
-                "cylinder head temp", "THERM", s->thermal.cht_c, "degC", 0);
-  check_channel(log, sim_time_s, &d->prev_egt,
-                ui_status_for(s->thermal.egt_c, RANGE_EGT), "exhaust gas temp",
-                "THERM", s->thermal.egt_c, "degC", 0);
-  check_channel(log, sim_time_s, &d->prev_oil_temp,
-                ui_status_for(s->thermal.oil_temp_c, RANGE_OIL), "oil temp",
-                "THERM", s->thermal.oil_temp_c, "degC", 0);
-  check_channel(log, sim_time_s, &d->prev_oil_press,
-                ui_status_for(s->lube.oil_press_kpa, RANGE_OIL_PRESS),
-                "oil pressure", "LUBE", s->lube.oil_press_kpa, "kPa", 0);
-  check_channel(log, sim_time_s, &d->prev_fuel_press,
-                ui_status_for(s->fuel.fuel_press_kpa, RANGE_FUEL_PRESS),
-                "fuel pressure", "FUEL", s->fuel.fuel_press_kpa, "kPa", 0);
-  check_channel(log, sim_time_s, &d->prev_bus_v,
-                ui_status_for(s->elec.bus_v, RANGE_BUS_V), "bus voltage",
-                "ELEC", s->elec.bus_v, "V", 1);
-  check_channel(log, sim_time_s, &d->prev_batt_soc,
-                ui_status_for(s->elec.batt_soc, RANGE_BATT_SOC), "battery SoC",
-                "ELEC", s->elec.batt_soc * 100.0, "%", 0);
 }
 
 void dashboard_sample(Dashboard *d, const ModelState *s) {
@@ -224,23 +77,23 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
   UiRect ev = ui_panel(r, envbox, th, "environment");
   UiStack es = ui_stack(ev, 2.0f);
   ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "outside air temp",
-                 s->env.oat_c, "degC", 1, UI_OK);
+                 s->env.oat_c, "degC", 1, CHANNEL_OK);
   ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "ambient press",
-                 s->env.ambient_kpa, "kPa", 1, UI_OK);
+                 s->env.ambient_kpa, "kPa", 1, CHANNEL_OK);
   ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "density altitude",
-                 s->env.density_alt_m, "m", 0, UI_OK);
+                 s->env.density_alt_m, "m", 0, CHANNEL_OK);
   ui_reading_row(r, ui_stack_row(&es, th->row_h), th, "true airspeed",
-                 s->env.airspeed_ms, "m/s", 1, UI_OK);
+                 s->env.airspeed_ms, "m/s", 1, CHANNEL_OK);
 
   UiRect g = ui_panel(r, gaugebox, th, "gauges");
   UiGrid gg = ui_grid(g, 2, 2, 8.0f);
-  ui_dial_gauge(r, ui_grid_at(gg, 0), th, "RPM", s->rpm, "rpm", 0, RANGE_RPM);
+  ui_dial_gauge(r, ui_grid_at(gg, 0), th, "RPM", s->rpm, "rpm", 0, CHANNEL_RANGE_RPM);
   ui_dial_gauge(r, ui_grid_at(gg, 1), th, "CHT", s->thermal.cht_c, "degC", 0,
-                RANGE_CHT);
+                CHANNEL_RANGE_CHT);
   ui_dial_gauge(r, ui_grid_at(gg, 2), th, "EGT", s->thermal.egt_c, "degC", 0,
-                RANGE_EGT);
+                CHANNEL_RANGE_EGT);
   ui_dial_gauge(r, ui_grid_at(gg, 3), th, "OIL", s->thermal.oil_temp_c, "degC",
-                0, RANGE_OIL);
+                0, CHANNEL_RANGE_OIL_TEMP);
 
   /* right column: trends fill the upper part, the subsystem list the rest */
   UiRect subbox;
@@ -249,13 +102,13 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
   UiRect tr = ui_panel(r, trends, th, "trends");
   UiGrid tg = ui_grid(tr, 1, 5, 6.0f);
   ui_sparkline(r, ui_grid_at(tg, 0), th, "RPM", "rpm", 0, &d->rpm_hist,
-               RANGE_RPM);
+               CHANNEL_RANGE_RPM);
   ui_sparkline(r, ui_grid_at(tg, 1), th, "CHT", "degC", 0, &d->cht_hist,
                RANGE_AUTO);
   ui_sparkline(r, ui_grid_at(tg, 2), th, "EGT", "degC", 0, &d->egt_hist,
                RANGE_AUTO);
   ui_sparkline(r, ui_grid_at(tg, 3), th, "OIL P", "kPa", 0, &d->oilp_hist,
-               RANGE_OIL_PRESS);
+               CHANNEL_RANGE_OIL_PRESS);
   ui_sparkline(r, ui_grid_at(tg, 4), th, "BATT", "%", 0, &d->batt_hist,
                RANGE_AUTO);
 
@@ -278,47 +131,47 @@ void dashboard_draw(Dashboard *d, SDL_Renderer *r, float w, float h,
   UiRect cy = ui_panel(r, cylbox, th, "cylinders");
   UiGrid cg = ui_grid(cy, 1, 3, 6.0f);
   ui_bar_series(r, ui_grid_at(cg, 0), th, "CHT", cht, NULL, nc, "degC", 0,
-                RANGE_CHT);
+                CHANNEL_RANGE_CHT);
   ui_bar_series(r, ui_grid_at(cg, 1), th, "EGT", egt, NULL, nc, "degC", 0,
-                RANGE_EGT);
+                CHANNEL_RANGE_EGT);
   ui_bar_series(r, ui_grid_at(cg, 2), th, "MIX", lam, NULL, nc, "L", 2,
-                RANGE_LAMBDA);
+                CHANNEL_RANGE_LAMBDA);
 
   UiRect stp = ui_panel(r, subbox, th, "subsystems");
   UiStack ss = ui_stack(stp, 2.0f);
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "revs per minute", s->rpm,
                  "rpm", 0,
-                 s->rpm > 300.0 ? ui_status_for(s->rpm, RANGE_RPM) : UI_STALE);
+                 channel_rpm_status(s->rpm));
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "cylinder head temp.",
                  s->thermal.cht_c, "degC", 0,
-                 ui_status_for(s->thermal.cht_c, RANGE_CHT));
+                 channel_status_for(s->thermal.cht_c, CHANNEL_RANGE_CHT));
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "exhaust gas temp.",
                  s->thermal.egt_c, "degC", 0,
-                 ui_status_for(s->thermal.egt_c, RANGE_EGT));
+                 channel_status_for(s->thermal.egt_c, CHANNEL_RANGE_EGT));
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "oil temp.",
                  s->thermal.oil_temp_c, "degC", 0,
-                 ui_status_for(s->thermal.oil_temp_c, RANGE_OIL));
+                 channel_status_for(s->thermal.oil_temp_c, CHANNEL_RANGE_OIL_TEMP));
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "oil pressure",
                  s->lube.oil_press_kpa, "kPa", 0,
-                 ui_status_for(s->lube.oil_press_kpa, RANGE_OIL_PRESS));
+                 channel_status_for(s->lube.oil_press_kpa, CHANNEL_RANGE_OIL_PRESS));
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "fuel pressure",
                  s->fuel.fuel_press_kpa, "kPa", 0,
-                 ui_status_for(s->fuel.fuel_press_kpa, RANGE_FUEL_PRESS));
+                 channel_status_for(s->fuel.fuel_press_kpa, CHANNEL_RANGE_FUEL_PRESS));
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "fuel flow",
-                 s->fuel.fuel_flow_kgph, "kg/h", 2, UI_OK);
+                 s->fuel.fuel_flow_kgph, "kg/h", 2, CHANNEL_OK);
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "air flow",
-                 s->fuel.air_flow_gps, "g/s", 1, UI_OK);
+                 s->fuel.air_flow_gps, "g/s", 1, CHANNEL_OK);
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "misfire (worst cyl)",
                  max_misfire * 100.0, "%", 0,
-                 max_misfire > 0.5   ? UI_ALERT
-                 : max_misfire > 0.0 ? UI_WARN
-                                     : UI_OK);
+                 max_misfire > 0.5   ? CHANNEL_ALERT
+                 : max_misfire > 0.0 ? CHANNEL_WARN
+                                     : CHANNEL_OK);
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "bus voltage",
                  s->elec.bus_v, "V", 1,
-                 ui_status_for(s->elec.bus_v, RANGE_BUS_V));
+                 channel_status_for(s->elec.bus_v, CHANNEL_RANGE_BUS_V));
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "alternator",
-                 s->elec.alt_current_a, "A", 1, UI_OK);
+                 s->elec.alt_current_a, "A", 1, CHANNEL_OK);
   ui_reading_row(r, ui_stack_row(&ss, th->row_h), th, "battery SoC",
                  s->elec.batt_soc * 100.0, "%", 0,
-                 ui_status_for(s->elec.batt_soc, RANGE_BATT_SOC));
+                 channel_status_for(s->elec.batt_soc, CHANNEL_RANGE_BATT_SOC));
 }

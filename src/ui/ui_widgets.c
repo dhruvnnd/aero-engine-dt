@@ -6,49 +6,37 @@ static const float kGlyph = (float)SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
 
 #define UI_SPARK_MAX 512
 
-UiStatus ui_status_for(double value, UiRange range) {
-  if ((range.has_alert_lo && value <= range.alert_lo) ||
-      (range.has_alert_hi && value >= range.alert_hi)) {
-    return UI_ALERT;
-  }
-  if ((range.has_warn_lo && value <= range.warn_lo) ||
-      (range.has_warn_hi && value >= range.warn_hi)) {
-    return UI_WARN;
-  }
-  return UI_OK;
-}
-
-SDL_Color ui_status_color(const UiTheme *th, UiStatus s) {
+SDL_Color ui_status_color(const UiTheme *th, ChannelStatus s) {
   switch (s) {
-  case UI_WARN:
+  case CHANNEL_WARN:
     return th->warn;
-  case UI_ALERT:
+  case CHANNEL_ALERT:
     return th->alert;
-  case UI_STALE:
+  case CHANNEL_STALE:
     return th->text_dim;
-  case UI_OK:
+  case CHANNEL_OK:
   default:
     return th->text;
   }
 }
 
 /* Vertical tick on a bar-gauge track at scale position `at`. */
-static void ui_gauge_tick(SDL_Renderer *r, UiRect track, UiRange range,
+static void ui_gauge_tick(SDL_Renderer *r, UiRect track, ChannelRange range,
                           double at, SDL_Color c) {
   float tx =
       track.x + (float)ui_map(at, range.lo, range.hi, 0.0, (double)track.w);
   ui_vline(r, tx, track.y - 2.0f, track.h + 4.0f, c);
 }
 
-const char *ui_status_token(UiStatus s) {
+const char *ui_status_token(ChannelStatus s) {
   switch (s) {
-  case UI_WARN:
+  case CHANNEL_WARN:
     return "[WARN]";
-  case UI_ALERT:
+  case CHANNEL_ALERT:
     return "[ALRM]";
-  case UI_STALE:
+  case CHANNEL_STALE:
     return "[----]";
-  case UI_OK:
+  case CHANNEL_OK:
   default:
     return "[ OK ]";
   }
@@ -73,7 +61,7 @@ UiRect ui_panel(SDL_Renderer *r, UiRect bounds, const UiTheme *th,
 
 void ui_reading_row(SDL_Renderer *r, UiRect b, const UiTheme *th,
                     const char *name, double value, const char *unit,
-                    int precision, UiStatus status) {
+                    int precision, ChannelStatus status) {
   if (!ui_rect_valid(b)) {
     return;
   }
@@ -107,11 +95,11 @@ void ui_stat_tile(SDL_Renderer *r, UiRect b, const UiTheme *th,
 
 void ui_bar_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
                   const char *label, double value, const char *unit,
-                  int precision, UiRange range) {
+                  int precision, ChannelRange range) {
   if (!ui_rect_valid(b)) {
     return;
   }
-  UiStatus st = ui_status_for(value, range);
+  ChannelStatus st = channel_status_for(value, range);
 
   UiRect rest;
   UiRect top = ui_split_top(b, kGlyph, 3.0f, &rest);
@@ -150,7 +138,7 @@ void ui_bar_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
 
 void ui_sparkline(SDL_Renderer *r, UiRect b, const UiTheme *th,
                   const char *label, const char *unit, int precision,
-                  const UiHistory *hist, UiRange range) {
+                  const UiHistory *hist, ChannelRange range) {
   if (!ui_rect_valid(b)) {
     return;
   }
@@ -212,7 +200,7 @@ void ui_sparkline(SDL_Renderer *r, UiRect b, const UiTheme *th,
 void ui_bar_series(SDL_Renderer *r, UiRect b, const UiTheme *th,
                    const char *label, const double *vals,
                    const char *const *tags, int n, const char *unit,
-                   int precision, UiRange range) {
+                   int precision, ChannelRange range) {
   if (!ui_rect_valid(b) || n < 1 || vals == NULL) {
     return;
   }
@@ -239,7 +227,7 @@ void ui_bar_series(SDL_Renderer *r, UiRect b, const UiTheme *th,
   float slot = in.w / (float)n;
   float bw = slot * 0.55f;
   for (int i = 0; i < n; i++) {
-    UiStatus st = ui_status_for(vals[i], range);
+    ChannelStatus st = channel_status_for(vals[i], range);
     float bh = (float)(in.h * ui_map(vals[i], range.lo, range.hi, 0.0, 1.0));
     UiRect bar = {in.x + slot * (float)i + (slot - bw) * 0.5f, in.y + in.h - bh,
                   bw, bh};
@@ -264,7 +252,7 @@ void ui_bar_series(SDL_Renderer *r, UiRect b, const UiTheme *th,
 #define UI_DIAL_SWEEP 270.0f /* clockwise to lower-right */
 #define UI_DIAL_D2R 0.017453292519943295f
 
-static float ui_dial_angle(double value, UiRange range) {
+static float ui_dial_angle(double value, ChannelRange range) {
   double t = ui_map(value, range.lo, range.hi, 0.0, 1.0);
   return UI_DIAL_START + UI_DIAL_SWEEP * (float)t;
 }
@@ -278,11 +266,11 @@ static void ui_dial_band(SDL_Renderer *r, float cx, float cy, float rad,
 
 void ui_dial_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
                    const char *label, double value, const char *unit,
-                   int precision, UiRange range) {
+                   int precision, ChannelRange range) {
   if (!ui_rect_valid(b)) {
     return;
   }
-  UiStatus st = ui_status_for(value, range);
+  ChannelStatus st = channel_status_for(value, range);
   float mx = b.x + b.w * 0.5f;
 
   /* caption row on top, digital readout row on the bottom, dial between */
@@ -344,7 +332,7 @@ void ui_dial_gauge(SDL_Renderer *r, UiRect b, const UiTheme *th,
 
   /* pointer */
   float na = ui_dial_angle(value, range) * UI_DIAL_D2R;
-  SDL_Color needle = (st == UI_OK) ? th->text_bright : ui_status_color(th, st);
+  SDL_Color needle = (st == CHANNEL_OK) ? th->text_bright : ui_status_color(th, st);
   ui_line(r, cx, cy, cx + SDL_cosf(na) * (rad - 4.0f),
           cy + SDL_sinf(na) * (rad - 4.0f), needle);
   ui_fill(r, (UiRect){cx - 2.0f, cy - 2.0f, 4.0f, 4.0f}, th->frame);
