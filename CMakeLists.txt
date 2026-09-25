@@ -128,6 +128,24 @@ target_include_directories(imgui PUBLIC "${IMGUI_DIR}" "${IMGUI_DIR}/backends")
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 target_compile_options(imgui PRIVATE -O2)
 
+# implot: vendored ImPlot (interactive 2D plots) built on top of imgui.
+set(IMPLOT_DIR "${CMAKE_SOURCE_DIR}/third_party/implot")
+
+if(NOT EXISTS "${IMPLOT_DIR}/implot.cpp")
+  message(FATAL_ERROR
+    "ImPlot not found at ${IMPLOT_DIR}. Clone https://github.com/epezent/implot "
+    "into third_party/implot.")
+endif()
+
+add_library(implot STATIC
+  "${IMPLOT_DIR}/implot.cpp"
+  "${IMPLOT_DIR}/implot_items.cpp"
+  "${IMPLOT_DIR}/implot_demo.cpp"
+)
+target_include_directories(implot PUBLIC "${IMPLOT_DIR}")
+target_link_libraries(implot PUBLIC imgui)
+target_compile_options(implot PRIVATE -O2)
+
 # aero_engine_dt: platform/sdl + ui (C) + main.cpp (C++ app shell hosting
 # ImGui)
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
@@ -140,7 +158,7 @@ list(APPEND APP_SOURCES "${CMAKE_SOURCE_DIR}/src/main.cpp")
 add_executable(aero_engine_dt ${APP_SOURCES})
 
 target_include_directories(aero_engine_dt PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(aero_engine_dt PRIVATE engine_core imgui SDL3::SDL3)
+target_link_libraries(aero_engine_dt PRIVATE engine_core imgui implot SDL3::SDL3)
 
 target_compile_options(aero_engine_dt PRIVATE
   -Wall -Wextra

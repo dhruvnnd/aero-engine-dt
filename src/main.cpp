@@ -8,6 +8,7 @@
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
+#include "implot.h"
 
 #include "model/state.h"
 #include "model/sync.h"
@@ -25,6 +26,7 @@
 #include "ui/event_log_panel.h"
 #include "ui/gamepad_panel.h"
 #include "ui/readout_panels.h"
+#include "ui/trends_panel.h"
 
 #define WIN_W 1000
 #define WIN_H 680
@@ -55,6 +57,8 @@ typedef struct {
   bool show_instruments;
   bool show_environment;
   bool show_cylinders;
+  bool show_trends;
+  bool show_implot_demo;
   bool show_legacy_dashboard; /* old hand-drawn screen, until ImPlot trends */
   bool show_imgui_demo;
   bool quit_requested;
@@ -99,6 +103,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
+  ImPlot::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 #ifdef IMGUI_HAS_DOCK
@@ -120,6 +125,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   app->show_instruments = true;
   app->show_environment = true;
   app->show_cylinders = true;
+  app->show_trends = true;
+  app->show_implot_demo = false;
   app->show_legacy_dashboard = true;
   app->show_imgui_demo = false;
 
@@ -348,11 +355,13 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("Instruments", NULL, &app->show_instruments);
       ImGui::MenuItem("Environment", NULL, &app->show_environment);
       ImGui::MenuItem("Cylinders", NULL, &app->show_cylinders);
+      ImGui::MenuItem("Trends", NULL, &app->show_trends);
       ImGui::MenuItem("Event Log", "L", &app->show_event_log);
       ImGui::MenuItem("Gamepad", "G", &app->show_gamepad);
       ImGui::Separator();
       ImGui::MenuItem("Legacy dashboard", NULL, &app->show_legacy_dashboard);
       ImGui::MenuItem("ImGui demo", NULL, &app->show_imgui_demo);
+      ImGui::MenuItem("ImPlot demo", NULL, &app->show_implot_demo);
       ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
@@ -372,6 +381,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     cylinders_panel_draw(&app->show_cylinders, shown,
                          app->sync.engine_config.num_cylinders);
   }
+  if (app->show_trends) {
+    trends_panel_draw(&app->show_trends, &app->trends, SAMPLE_PERIOD_S);
+  }
   if (app->show_event_log) {
     event_log_panel_draw(&app->show_event_log, &app->events);
   }
@@ -380,6 +392,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   }
   if (app->show_imgui_demo) {
     ImGui::ShowDemoWindow(&app->show_imgui_demo);
+  }
+  if (app->show_implot_demo) {
+    ImPlot::ShowDemoWindow(&app->show_implot_demo);
   }
   ImGui::Render();
 
@@ -410,6 +425,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   sdl_input_shutdown(&app->input);
   ImGui_ImplSDLRenderer3_Shutdown();
   ImGui_ImplSDL3_Shutdown();
+  ImPlot::DestroyContext();
   ImGui::DestroyContext();
   sdl_window_shutdown(&app->window_ctx);
 }
