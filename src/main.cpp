@@ -33,10 +33,6 @@
 #define GP_WIN_W 540
 #define GP_WIN_H 860
 
-/* Companion window that lists the event log. */
-#define LOG_WIN_W 620
-#define LOG_WIN_H 700
-
 /* Trend sampling cadence -- the histories advance at this rate regardless of
  * render frame rate. */
 #define SAMPLE_PERIOD_S 0.1
@@ -57,8 +53,7 @@ typedef struct {
   SdlWindowContext
       gamepad_ctx; /* companion panel; window == NULL if it failed */
   bool gamepad_win_shown;
-  SdlWindowContext log_ctx; /* companion panel; window == NULL if it failed */
-  bool log_win_shown;
+  bool show_event_log; /* ImGui event log window open/closed */
   SdlFrameTimer timer;
 
   ModelSync sync;
@@ -126,17 +121,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     app->gamepad_win_shown = false;
   }
 
-  /* Same deal for the event log panel; the L key brings it up on demand. */
-  if (sdl_window_init(&app->log_ctx, "aero engine dt | event log", LOG_WIN_W,
-                      LOG_WIN_H)) {
-    SDL_HideWindow(app->log_ctx.window);
-    app->log_win_shown = false;
-  } else {
-    SDL_Log("event log window unavailable: %s", SDL_GetError());
-    app->log_ctx.window = NULL;
-    app->log_ctx.renderer = NULL;
-    app->log_win_shown = false;
-  }
+  app->show_event_log = true; /* L toggles it */
 
   event_log_init(&app->events);
   event_log_push(&app->events, 0.0, EVENT_INFO, "SYSTEM", "dashboard started");
@@ -213,12 +198,6 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
       app->gamepad_win_shown = false;
       return SDL_APP_CONTINUE;
     }
-    if (app->log_ctx.window &&
-        event->window.windowID == SDL_GetWindowID(app->log_ctx.window)) {
-      SDL_HideWindow(app->log_ctx.window);
-      app->log_win_shown = false;
-      return SDL_APP_CONTINUE;
-    }
     return SDL_APP_SUCCESS;
   }
 
@@ -246,14 +225,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
-      event->key.key == SDLK_L && app->log_ctx.window) {
-    app->log_win_shown = !app->log_win_shown;
-    if (app->log_win_shown) {
-      SDL_ShowWindow(app->log_ctx.window);
-      SDL_RaiseWindow(app->log_ctx.window);
-    } else {
-      SDL_HideWindow(app->log_ctx.window);
-    }
+      event->key.key == SDLK_L) {
+    app->show_event_log = !app->show_event_log;
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -377,6 +350,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
                                ImGuiDockNodeFlags_PassthruCentralNode);
 #endif
+  if (app->show_event_log) {
+    event_log_panel_draw(&app->show_event_log, &app->events);
+  }
   ImGui::ShowDemoWindow();
   ImGui::Render();
 
@@ -403,14 +379,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     SDL_RenderPresent(gr);
   }
 
-  if (app->log_ctx.window && app->log_win_shown) {
-    SDL_Renderer *lr = app->log_ctx.renderer;
-    SDL_SetRenderDrawColor(lr, 10, 14, 12, SDL_ALPHA_OPAQUE);
-    SDL_RenderClear(lr);
-    event_log_panel_draw(lr, (float)LOG_WIN_W, (float)LOG_WIN_H, &app->events);
-    SDL_RenderPresent(lr);
-  }
-
   return SDL_APP_CONTINUE;
 }
 
@@ -423,9 +391,6 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   ImGui::DestroyContext();
   if (app->gamepad_ctx.window) {
     sdl_window_shutdown(&app->gamepad_ctx);
-  }
-  if (app->log_ctx.window) {
-    sdl_window_shutdown(&app->log_ctx);
   }
   sdl_window_shutdown(&app->window_ctx);
 }
