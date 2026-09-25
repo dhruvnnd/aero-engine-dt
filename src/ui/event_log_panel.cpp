@@ -1,6 +1,7 @@
 #include "ui/event_log_panel.h"
 
 #include "imgui.h"
+#include "ui/panel_names.h"
 
 static const char *level_token(EventLevel lvl) {
   switch (lvl) {
@@ -28,7 +29,7 @@ static ImVec4 level_color(EventLevel lvl) {
 
 void event_log_panel_draw(bool *open, const EventLog *log) {
   ImGui::SetNextWindowSize(ImVec2(620.0f, 400.0f), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Event Log", open)) {
+  if (!ImGui::Begin(PANEL_EVENT_LOG, open)) {
     ImGui::End();
     return;
   }

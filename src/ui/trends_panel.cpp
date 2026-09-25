@@ -1,6 +1,7 @@
 #include "ui/trends_panel.h"
 
 #include "imgui.h"
+#include "ui/panel_names.h"
 #include "implot.h"
 #include "telemetry/monitor.h"
 
@@ -70,7 +71,7 @@ static void plot_trend(const TrendDef &d, double dt, double span_s) {
 
 void trends_panel_draw(bool *open, const Trends *t, double sample_period_s) {
   ImGui::SetNextWindowSize(ImVec2(620.0f, 640.0f), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Trends", open)) {
+  if (!ImGui::Begin(PANEL_TRENDS, open)) {
     ImGui::End();
     return;
   }
