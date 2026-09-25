@@ -23,6 +23,7 @@ set(ENGINE_CORE_TESTS
   test_annunciator
   test_sim_clock
   test_cyl_trends
+  test_run_recorder
   test_history
   test_trends
   test_crank_thermo

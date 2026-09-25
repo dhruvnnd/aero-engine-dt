@@ -5,12 +5,8 @@
 
 /* Flight-condition rate controls and their clamps. */
 #define SDL_INPUT_ALT_RATE_M_PER_S 300.0
-#define SDL_INPUT_ALT_MAX_M 12000.0
 #define SDL_INPUT_SPD_RATE_MS_PER_S 10.0
-#define SDL_INPUT_SPD_MAX_MS 120.0
 #define SDL_INPUT_OAT_RATE_C_PER_S 5.0
-#define SDL_INPUT_OAT_MIN_C -40.0
-#define SDL_INPUT_OAT_MAX_C 50.0
 
 /* Stick deflection (0..1) inside which the axis reads as centred. */
 #define SDL_INPUT_STICK_DEADZONE 0.25

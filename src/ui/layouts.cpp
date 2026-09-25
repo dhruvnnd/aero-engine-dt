@@ -38,7 +38,8 @@ PanelVisibility layout_visibility(int id) {
     break;
   }
   v.alarms = true; /* thin bar along the bottom; closable, movable */
-  v.faults = true; /* a tab beside Sim in every layout */
+  v.controls = true; /* tabs beside Sim in every layout */
+  v.faults = true;
   v.cyl_trends = true; /* a tab beside Trends / Cylinders */
   return v;
 }
@@ -90,7 +91,7 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS);
     DOCK(right, PANEL_INSTRUMENTS);
     DOCK(right_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
-         PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD);
+         PANEL_CONTROLS, PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD);
     break;
   }
   case LAYOUT_SYSTEMS: {
@@ -101,7 +102,8 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(left, PANEL_INSTRUMENTS);
     DOCK(cylinders, PANEL_CYLINDERS, PANEL_CYL_TRENDS);
     DOCK(environment, PANEL_ENVIRONMENT);
-    DOCK(rest, PANEL_SIM, PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD,
+    DOCK(rest, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS, PANEL_EVENT_LOG,
+         PANEL_GAMEPAD,
          PANEL_TRENDS);
     break;
   }
@@ -114,7 +116,8 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(left_bottom, PANEL_INSTRUMENTS, PANEL_CYLINDERS, PANEL_TRENDS,
          PANEL_CYL_TRENDS);
     DOCK(right, PANEL_GAMEPAD);
-    DOCK(right_bottom, PANEL_SIM, PANEL_FAULTS, PANEL_ENVIRONMENT);
+    DOCK(right_bottom, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS,
+         PANEL_ENVIRONMENT);
     break;
   }
   case LAYOUT_OVERVIEW:
@@ -125,7 +128,7 @@ void layout_apply(int id, ImVec2 size) {
     ImGuiID right_bottom = carve(rest, ImGuiDir_Down, 0.28f);
     DOCK(left, PANEL_INSTRUMENTS);
     DOCK(left_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
-         PANEL_FAULTS);
+         PANEL_CONTROLS, PANEL_FAULTS);
     DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS);
     DOCK(right_bottom, PANEL_EVENT_LOG, PANEL_GAMEPAD);
     break;

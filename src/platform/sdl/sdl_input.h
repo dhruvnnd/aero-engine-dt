@@ -7,6 +7,13 @@ extern "C" {
 
 #include <SDL3/SDL.h>
 
+/* Flight-condition limits, shared with anything that sets them directly (UI
+ * sliders) so they can't drift from what the keyboard / gamepad clamp to. */
+#define SDL_INPUT_ALT_MAX_M 12000.0
+#define SDL_INPUT_SPD_MAX_MS 120.0
+#define SDL_INPUT_OAT_MIN_C -40.0
+#define SDL_INPUT_OAT_MAX_C 50.0
+
 typedef struct {
   double throttle;     /* current lever position, 0.0 (closed) .. 1.0 (WOT) */
   double altitude_m;   /* pressure altitude, m; 0 .. 12000 */
