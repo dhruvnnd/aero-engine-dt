@@ -30,6 +30,8 @@ typedef enum {
   ENGINE_RUNNING = 2
 } EngineRunState;
 
+typedef struct EngineTrace EngineTrace;
+
 typedef struct {
   double omega_rad_s; /* crank angular velocity */
   double map_kpa;     /* manifold absolute pressure */
@@ -37,6 +39,8 @@ typedef struct {
   double torque_nm;   /* mean total indicated torque */
   EngineRunState run_state;
   int ignition_on;
+
+  EngineTrace *trace;
 } EngineState;
 
 typedef struct {
@@ -74,6 +78,10 @@ void engine_model_start(EngineState *state, const EngineConfig *config,
 /* Deliberate manual shutdown */
 void engine_model_stop(EngineState *state);
 
+/*  `dt` is a frame time; the integration is sub-stepped internally (~1 deg of
+ * crank rotation each). Cylinder i runs its cycle offset from the crank by
+ * engine_cylinder_phase_offsets(), so cylinders fire in firing_order,
+ * 720/num_cylinders degrees apart. */
 void engine_model_step(EngineState *state, const EngineConfig *config,
                        const EngineInput *input, const FuelConfig *fuel_cfg,
                        const CylinderConfig *cylinders,
@@ -106,8 +114,8 @@ int engine_config_check(const EngineConfig *cfg,
 typedef struct {
   double displacement_per_cyl_l;
   double total_displacement_l;
-  double clearance_cc;            /* per cylinder */
-  double firing_interval_deg;     /* 720 / num_cylinders */
+  double clearance_cc;        /* per cylinder */
+  double firing_interval_deg; /* 720 / num_cylinders */
   double bore_stroke_ratio;
   double rod_ratio;               /* conrod length / stroke */
   double piston_speed_3000rpm_ms; /* mean piston speed */
@@ -119,6 +127,11 @@ EngineDerived engine_config_derived(const EngineConfig *cfg);
  * are clamped. */
 void engine_default_firing_order(int num_cylinders,
                                  int out[ENGINE_MAX_CYLINDERS]);
+
+/* Crank-angle phase of each cylinder's cycle relative to the crank, from
+ * firing_order */
+void engine_cylinder_phase_offsets(const EngineConfig *cfg,
+                                   double out[ENGINE_MAX_CYLINDERS]);
 
 #ifdef __cplusplus
 }

@@ -4,6 +4,7 @@
 #include <math.h>
 
 #include "math/units.h"
+#include "physics/engine_trace.h"
 #include "physics/integrator.h"
 
 enum {
@@ -30,6 +31,8 @@ typedef struct {
   double intake_temp_c;
   double eff_cr[ENGINE_MAX_CYLINDERS];
   double v_ivc_m3[ENGINE_MAX_CYLINDERS];
+  double phase_offset_deg[ENGINE_MAX_CYLINDERS]; /* cylinder's cycle lag behind
+                                                    the crank, from firing_order */
   int cranking;
   double starter_torque_nm;
   int ignition_on;
@@ -47,21 +50,35 @@ static double map_target_kpa(double throttle, double ambient_pressure_kpa) {
   return map_idle_kpa + throttle * (map_wot_kpa - map_idle_kpa);
 }
 
-static double cylinders_total_torque_from_vec(const double *vec,
-                                              const EngineDerivParams *p) {
+/* Crank torque at the state in `vec`: each cylinder's gas + inertia torque,
+ * evaluated at its own local crank angle, plus the starter while cranking.
+ * Returns the total; `gas_nm` / `inertia_nm` (each may be NULL) receive the
+ * per-cylinder components. */
+static double cylinder_torques_from_vec(const double *vec,
+                                        const EngineDerivParams *p,
+                                        double *gas_nm, double *inertia_nm) {
   double omega = vec[ENGINE_STATE_OMEGA];
   double theta_deg = vec[ENGINE_STATE_THETA];
   double total = 0.0;
   for (int i = 0; i < p->num_cylinders; i++) {
     double pressure_kpa = vec[ENGINE_STATE_PRESSURE_BASE + i];
+    double theta_local = theta_deg - p->phase_offset_deg[i];
 
     CylinderVolumeDeriv vd =
-        cylinder_volume_and_deriv(theta_deg, p->geom, p->eff_cr[i]);
-    CylinderKinematics k = cylinder_kinematics(theta_deg, p->geom);
+        cylinder_volume_and_deriv(theta_local, p->geom, p->eff_cr[i]);
+    CylinderKinematics k = cylinder_kinematics(theta_local, p->geom);
     double accel = omega * omega * k.d2x_drad2;
     double f_inertia = -p->geom->m_recip_kg * accel;
 
-    total += kpa_to_pa(pressure_kpa) * vd.dv_drad + f_inertia * k.dx_drad;
+    double gas = kpa_to_pa(pressure_kpa) * vd.dv_drad;
+    double inertia = f_inertia * k.dx_drad;
+    if (gas_nm) {
+      gas_nm[i] = gas;
+    }
+    if (inertia_nm) {
+      inertia_nm[i] = inertia;
+    }
+    total += gas + inertia;
   }
   if (p->cranking) {
     total += p->starter_torque_nm;
@@ -79,16 +96,20 @@ static void engine_derivative(const double *state, double *dstate, double t,
   double theta_deg = state[ENGINE_STATE_THETA];
   double rpm = rad_s_to_rpm(omega);
   double dtheta_dt_deg_per_s = omega * (180.0 / UNITS_PI);
-  int closed = cylinder_valve_closed(theta_deg, p->geom);
 
   double torque_total = 0.0;
   for (int i = 0; i < p->num_cylinders; i++) {
     const CylinderConfig *c = &p->cylinders[i];
     double pressure_kpa = state[ENGINE_STATE_PRESSURE_BASE + i];
 
+    /* Each cylinder sits at its own point in the four-stroke cycle: the crank
+     * angle minus its firing-order phase. */
+    double theta_local = theta_deg - p->phase_offset_deg[i];
+    int closed = cylinder_valve_closed(theta_local, p->geom);
+
     CylinderVolumeDeriv vd =
-        cylinder_volume_and_deriv(theta_deg, p->geom, p->eff_cr[i]);
-    CylinderKinematics k = cylinder_kinematics(theta_deg, p->geom);
+        cylinder_volume_and_deriv(theta_local, p->geom, p->eff_cr[i]);
+    CylinderKinematics k = cylinder_kinematics(theta_local, p->geom);
     double accel = omega * omega * k.d2x_drad2;
     double f_inertia = -p->geom->m_recip_kg * accel;
     torque_total +=
@@ -110,9 +131,10 @@ static void engine_derivative(const double *state, double *dstate, double t,
           map_kpa, p->intake_temp_c, p->v_ivc_m3[i], p->geom,
           p->fuel_cfg->afr_stoich, lambda, misfire);
       double dq_ddeg =
-          q_total_j * wiebe_burn_rate_per_deg(
-                          theta_deg, theta_start, p->geom->delta_theta_burn_deg,
-                          p->geom->wiebe_a, p->geom->wiebe_m);
+          q_total_j *
+          wiebe_burn_rate_per_deg(theta_local, theta_start,
+                                  p->geom->delta_theta_burn_deg,
+                                  p->geom->wiebe_a, p->geom->wiebe_m);
 
       double p_pa = kpa_to_pa(pressure_kpa);
       double dp_ddeg_pa = -ENGINE_POLYTROPIC_N * (p_pa / vd.v_m3) * vd.dv_ddeg +
@@ -168,6 +190,7 @@ void engine_model_init(EngineState *state, const EngineConfig *config) {
   state->torque_nm = 0.0;
   state->run_state = ENGINE_RUNNING;
   state->ignition_on = 1;
+  state->trace = NULL;
 }
 
 #define ENGINE_STALL_RPM 150.0
@@ -184,6 +207,9 @@ void engine_model_start(EngineState *state, const EngineConfig *config,
   state->torque_nm = 0.0;
   state->run_state = ENGINE_CRANKING;
   state->ignition_on = 1;
+  if (state->trace) {
+    engine_trace_clear(state->trace); /* crank angle just jumped back to 0 */
+  }
 }
 
 void engine_model_stop(EngineState *state) {
@@ -239,6 +265,7 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
   params.cranking = was_cranking;
   params.starter_torque_nm = config->starter_torque_nm;
   params.ignition_on = state->ignition_on;
+  engine_cylinder_phase_offsets(config, params.phase_offset_deg);
   for (int i = 0; i < n_cyl; i++) {
     double trim = cylinders[i].compression_trim;
     params.eff_cr[i] =
@@ -268,7 +295,25 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
     integrator_rk4_step(vec, n_state, t_local, h, engine_derivative, &params);
     t_local += h;
     remaining -= h;
-    torque_accum += cylinders_total_torque_from_vec(vec, &params);
+    if (state->trace) {
+      EngineTraceSample s;
+      double gas[ENGINE_MAX_CYLINDERS] = {0};
+      double inertia[ENGINE_MAX_CYLINDERS] = {0};
+      double total = cylinder_torques_from_vec(vec, &params, gas, inertia);
+      torque_accum += total;
+      s.theta_deg = (float)crank_wrap720_deg(vec[ENGINE_STATE_THETA]);
+      s.omega_rad_s = (float)vec[ENGINE_STATE_OMEGA];
+      s.torque_nm = (float)total;
+      for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+        s.cyl_gas_nm[i] = (float)gas[i];
+        s.cyl_inertia_nm[i] = (float)inertia[i];
+        s.cyl_pressure_kpa[i] =
+            i < n_cyl ? (float)vec[ENGINE_STATE_PRESSURE_BASE + i] : 0.0f;
+      }
+      engine_trace_push(state->trace, &s);
+    } else {
+      torque_accum += cylinder_torques_from_vec(vec, &params, NULL, NULL);
+    }
     substeps++;
 
     if (vec[ENGINE_STATE_OMEGA] < stall_omega_rad_s) {
@@ -391,6 +436,42 @@ EngineDerived engine_config_derived(const EngineConfig *cfg) {
   d.rod_ratio = g->stroke_m > 0.0 ? g->conrod_len_m / g->stroke_m : 0.0;
   d.piston_speed_3000rpm_ms = 2.0 * g->stroke_m * 3000.0 / 60.0;
   return d;
+}
+
+void engine_cylinder_phase_offsets(const EngineConfig *cfg,
+                                   double out[ENGINE_MAX_CYLINDERS]) {
+  const int n = cfg->num_cylinders < 0
+                    ? 0
+                    : (cfg->num_cylinders > ENGINE_MAX_CYLINDERS
+                           ? ENGINE_MAX_CYLINDERS
+                           : cfg->num_cylinders);
+
+  int seen[ENGINE_MAX_CYLINDERS + 1] = {0};
+  int valid = 1;
+  for (int k = 0; k < n; k++) {
+    int f = cfg->firing_order[k];
+    if (f < 1 || f > n || seen[f]) {
+      valid = 0;
+    } else {
+      seen[f] = 1;
+    }
+  }
+
+  int order[ENGINE_MAX_CYLINDERS];
+  if (valid) {
+    for (int k = 0; k < ENGINE_MAX_CYLINDERS; k++) {
+      order[k] = cfg->firing_order[k];
+    }
+  } else {
+    engine_default_firing_order(n, order);
+  }
+
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    out[i] = 0.0;
+  }
+  for (int k = 0; k < n; k++) {
+    out[order[k] - 1] = (double)k * 720.0 / (double)n;
+  }
 }
 
 void engine_default_firing_order(int num_cylinders,

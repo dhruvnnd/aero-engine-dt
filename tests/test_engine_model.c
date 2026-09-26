@@ -4,6 +4,7 @@
 #include "physics/combustion.h"
 #include "physics/cylinder.h"
 #include "physics/engine_model.h"
+#include "physics/engine_trace.h"
 #include "physics/environment.h"
 #include "physics/fuel.h"
 
@@ -392,6 +393,326 @@ static void test_starter_alone_can_crank_engine_up(void) {
   CHECK(engine_model_rpm(&st) > cfg.starter_catch_rpm);
 }
 
+/* ---- Phase 2: firing order, phase offsets, torque ripple ---- */
+
+static void test_phase_offsets_follow_firing_order(void) {
+  EngineConfig cfg = engine_config_default(); /* 4 cyl, 1-3-4-2 */
+  double off[ENGINE_MAX_CYLINDERS];
+  engine_cylinder_phase_offsets(&cfg, off);
+  CHECK_NEAR(off[0], 0.0, 1e-12);   /* cylinder 1 fires first */
+  CHECK_NEAR(off[2], 180.0, 1e-12); /* then 3 */
+  CHECK_NEAR(off[3], 360.0, 1e-12); /* then 4 */
+  CHECK_NEAR(off[1], 540.0, 1e-12); /* then 2 */
+  CHECK_NEAR(off[4], 0.0, 1e-12);   /* unused slots stay zero */
+
+  cfg.num_cylinders = 6;
+  engine_default_firing_order(6, cfg.firing_order); /* 1-5-3-6-2-4 */
+  engine_cylinder_phase_offsets(&cfg, off);
+  CHECK_NEAR(off[0], 0.0, 1e-12);
+  CHECK_NEAR(off[4], 120.0, 1e-12);
+  CHECK_NEAR(off[2], 240.0, 1e-12);
+  CHECK_NEAR(off[5], 360.0, 1e-12);
+  CHECK_NEAR(off[1], 480.0, 1e-12);
+  CHECK_NEAR(off[3], 600.0, 1e-12);
+
+  cfg.num_cylinders = 1;
+  engine_default_firing_order(1, cfg.firing_order);
+  engine_cylinder_phase_offsets(&cfg, off);
+  CHECK_NEAR(off[0], 0.0, 1e-12);
+}
+
+/* A firing_order that isn't a permutation must not index out of bounds or
+ * stack cylinders on top of each other: it falls back to the default order. */
+static void test_phase_offsets_fall_back_on_invalid_firing_order(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.firing_order[0] = 2; /* 2,3,4,2: repeated entry */
+  cfg.firing_order[1] = 3;
+  cfg.firing_order[2] = 4;
+  cfg.firing_order[3] = 2;
+  double off[ENGINE_MAX_CYLINDERS];
+  engine_cylinder_phase_offsets(&cfg, off);
+  CHECK_NEAR(off[0], 0.0, 1e-12); /* default 1-3-4-2 */
+  CHECK_NEAR(off[2], 180.0, 1e-12);
+  CHECK_NEAR(off[3], 360.0, 1e-12);
+  CHECK_NEAR(off[1], 540.0, 1e-12);
+
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    cfg.firing_order[i] = 0; /* nothing set at all */
+  }
+  engine_cylinder_phase_offsets(&cfg, off);
+  CHECK_NEAR(off[2], 180.0, 1e-12);
+}
+
+/* Steady, healthy engine with a trace attached; returns after `settle_s`
+ * seconds plus a couple more so the ring holds several settled cycles. */
+static void run_traced(EngineState *st, EngineTrace *tr, const EngineConfig *cfg,
+                       CylinderConfig *cyl, double throttle, double load) {
+  CylinderState cyl_states[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cyl_states);
+  FuelConfig fuel_cfg = fuel_config_default();
+  engine_model_init(st, cfg);
+  st->trace = tr;
+  EngineInput in = make_input(throttle, load, 101.325);
+  double t = 0.0;
+  for (int i = 0; i < 200; i++) { /* 4 s */
+    engine_model_step(st, cfg, &in, &fuel_cfg, cyl, cyl_states,
+                      TEST_INTAKE_TEMP_C, t, 0.02);
+    t += 0.02;
+  }
+}
+
+static void default_cyl_configs(CylinderConfig *cyl) {
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    cyl[i] = cylinder_config_default();
+  }
+}
+
+/* Window of the newest full cycle inside `tr`: fills *first and returns n. */
+static int newest_cycle(const EngineTrace *tr, int *first) {
+  int n = engine_trace_last_cycle_count(tr);
+  *first = engine_trace_count(tr) - n;
+  return n;
+}
+
+/* Crank angle where cylinder `cyl`'s gas torque peaks in the newest cycle. */
+static double peak_gas_theta_deg(const EngineTrace *tr, int cyl) {
+  int first;
+  int n = newest_cycle(tr, &first);
+  double best = -1e30;
+  double at = 0.0;
+  for (int i = 0; i < n; i++) {
+    const EngineTraceSample *s = engine_trace_at(tr, first + i);
+    if (s->cyl_gas_nm[cyl] > best) {
+      best = s->cyl_gas_nm[cyl];
+      at = s->theta_deg;
+    }
+  }
+  return at;
+}
+
+/* Forward crank angle from a to b, deg in [0,720). */
+static double gap_deg(double a, double b) { return fmod(b - a + 1440.0, 720.0); }
+
+/* The point of the phase offsets: with 1-3-4-2, the cylinders' gas-torque
+ * pulses follow each other 180 deg apart instead of coinciding. */
+static void check_firing_spacing(const EngineConfig *cfg, const EngineTrace *tr) {
+  const double spacing = 720.0 / cfg->num_cylinders;
+  for (int k = 0; k < cfg->num_cylinders; k++) {
+    int a = cfg->firing_order[k] - 1;
+    int b = cfg->firing_order[(k + 1) % cfg->num_cylinders] - 1;
+    double gap = gap_deg(peak_gas_theta_deg(tr, a), peak_gas_theta_deg(tr, b));
+    CHECK_NEAR(gap, spacing, 10.0);
+  }
+}
+
+static void test_cylinders_fire_in_order_evenly_spaced(void) {
+  EngineConfig cfg = engine_config_default();
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  static EngineTrace tr;
+  EngineState st;
+  run_traced(&st, &tr, &cfg, cyl, 0.8, 10.0);
+  CHECK(st.run_state == ENGINE_RUNNING);
+  check_firing_spacing(&cfg, &tr);
+}
+
+/* firing_order must actually be read: 1-2-4-3 puts cylinder 2 second. */
+static void test_alternate_firing_order_changes_the_sequence(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.firing_order[0] = 1;
+  cfg.firing_order[1] = 2;
+  cfg.firing_order[2] = 4;
+  cfg.firing_order[3] = 3;
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  static EngineTrace tr;
+  EngineState st;
+  run_traced(&st, &tr, &cfg, cyl, 0.8, 10.0);
+  check_firing_spacing(&cfg, &tr);
+  CHECK_NEAR(gap_deg(peak_gas_theta_deg(&tr, 0), peak_gas_theta_deg(&tr, 1)),
+             180.0, 10.0);
+}
+
+static void test_six_cylinder_spacing(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.num_cylinders = 6;
+  engine_default_firing_order(6, cfg.firing_order);
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  static EngineTrace tr;
+  EngineState st;
+  run_traced(&st, &tr, &cfg, cyl, 0.8, 10.0);
+  CHECK(st.run_state == ENGINE_RUNNING);
+  check_firing_spacing(&cfg, &tr);
+}
+
+/* Staggering spreads the same work over the cycle: the summed torque swings
+ * far less than N cylinders firing in unison would (approximated as N x one
+ * cylinder's own gas+inertia torque), while the cycle mean is unchanged. */
+static void test_staggering_reduces_ripple_and_conserves_mean(void) {
+  EngineConfig cfg = engine_config_default();
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  static EngineTrace tr;
+  EngineState st;
+  run_traced(&st, &tr, &cfg, cyl, 0.8, 10.0);
+
+  int first;
+  int n = newest_cycle(&tr, &first);
+  CHECK(n > 300);
+  double n_cyl = (double)cfg.num_cylinders;
+
+  double tot_min = 1e30, tot_max = -1e30, tot_sum = 0.0;
+  double uni_min = 1e30, uni_max = -1e30, uni_sum = 0.0;
+  for (int i = 0; i < n; i++) {
+    const EngineTraceSample *s = engine_trace_at(&tr, first + i);
+    double total = s->torque_nm;
+    double unison = n_cyl * (s->cyl_gas_nm[0] + s->cyl_inertia_nm[0]);
+    tot_min = total < tot_min ? total : tot_min;
+    tot_max = total > tot_max ? total : tot_max;
+    tot_sum += total;
+    uni_min = unison < uni_min ? unison : uni_min;
+    uni_max = unison > uni_max ? unison : uni_max;
+    uni_sum += unison;
+  }
+  double tot_mean = tot_sum / n;
+  double uni_mean = uni_sum / n;
+
+  CHECK((tot_max - tot_min) < 0.6 * (uni_max - uni_min));
+  CHECK(tot_mean > 0.0);
+  CHECK_NEAR(tot_mean, uni_mean, 0.10 * fabs(uni_mean) + 1.0);
+}
+
+/* Reciprocating-mass inertia torque does no net work over a full cycle, per
+ * cylinder, at (nearly) constant speed. */
+static void test_inertia_torque_averages_to_zero_over_a_cycle(void) {
+  EngineConfig cfg = engine_config_default();
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  static EngineTrace tr;
+  EngineState st;
+  run_traced(&st, &tr, &cfg, cyl, 0.8, 10.0);
+
+  int first;
+  int n = newest_cycle(&tr, &first);
+  for (int c = 0; c < cfg.num_cylinders; c++) {
+    double sum = 0.0, peak = 0.0;
+    for (int i = 0; i < n; i++) {
+      double v = engine_trace_at(&tr, first + i)->cyl_inertia_nm[c];
+      sum += v;
+      peak = fabs(v) > peak ? fabs(v) : peak;
+    }
+    CHECK(peak > 1.0); /* it is really there... */
+    CHECK(fabs(sum / n) < 0.1 * peak); /* ...and cancels */
+  }
+}
+
+/* A dead cylinder leaves a hole in the pulse train at its own firing slot,
+ * not everywhere. */
+static void test_dead_cylinder_drops_its_own_pulse(void) {
+  EngineConfig cfg = engine_config_default();
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  cyl[2].injector_flow_trim = 0.4; /* lambda 2.5: outside flammability -> misfire */
+  static EngineTrace tr;
+  EngineState st;
+  run_traced(&st, &tr, &cfg, cyl, 0.9, 5.0);
+  CHECK(st.run_state == ENGINE_RUNNING);
+
+  int first;
+  int n = newest_cycle(&tr, &first);
+  double peak[ENGINE_MAX_CYLINDERS] = {0};
+  for (int i = 0; i < n; i++) {
+    const EngineTraceSample *s = engine_trace_at(&tr, first + i);
+    for (int c = 0; c < cfg.num_cylinders; c++) {
+      peak[c] = s->cyl_gas_nm[c] > peak[c] ? s->cyl_gas_nm[c] : peak[c];
+    }
+  }
+  for (int c = 0; c < cfg.num_cylinders; c++) {
+    if (c != 2) {
+      CHECK(peak[2] < 0.5 * peak[c]);
+    }
+  }
+}
+
+/* Attaching a trace is observation only. */
+static void test_trace_does_not_change_the_simulation(void) {
+  EngineConfig cfg = engine_config_default();
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  FuelConfig fuel_cfg = fuel_config_default();
+  EngineInput in = make_input(0.7, 12.0, 101.325);
+
+  static EngineTrace tr;
+  EngineState with, without;
+  engine_model_init(&with, &cfg);
+  engine_model_init(&without, &cfg);
+  CHECK(without.trace == NULL);
+  with.trace = &tr;
+  CylinderState cs_with[ENGINE_MAX_CYLINDERS], cs_without[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs_with);
+  init_cyl_states(cs_without);
+  for (int i = 0; i < 100; i++) {
+    engine_model_step(&with, &cfg, &in, &fuel_cfg, cyl, cs_with,
+                      TEST_INTAKE_TEMP_C, i * 0.02, 0.02);
+    engine_model_step(&without, &cfg, &in, &fuel_cfg, cyl, cs_without,
+                      TEST_INTAKE_TEMP_C, i * 0.02, 0.02);
+  }
+  CHECK(engine_trace_count(&tr) > 0);
+  CHECK(with.omega_rad_s == without.omega_rad_s);
+  CHECK(with.map_kpa == without.map_kpa);
+  CHECK(with.theta_deg == without.theta_deg);
+  CHECK(with.torque_nm == without.torque_nm);
+}
+
+/* Trace samples are the integrator's own numbers: the frame-mean torque is
+ * the mean of that frame's samples. */
+static void test_trace_total_matches_reported_mean_torque(void) {
+  EngineConfig cfg = engine_config_default();
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  default_cyl_configs(cyl);
+  FuelConfig fuel_cfg = fuel_config_default();
+  EngineInput in = make_input(0.7, 12.0, 101.325);
+  static EngineTrace tr;
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  st.trace = &tr;
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  for (int i = 0; i < 50; i++) {
+    engine_model_step(&st, &cfg, &in, &fuel_cfg, cyl, cs, TEST_INTAKE_TEMP_C,
+                      i * 0.02, 0.02);
+  }
+  engine_trace_clear(&tr);
+  engine_model_step(&st, &cfg, &in, &fuel_cfg, cyl, cs, TEST_INTAKE_TEMP_C, 1.0,
+                    0.02);
+  int n = engine_trace_count(&tr);
+  CHECK(n > 10);
+  double sum = 0.0;
+  for (int i = 0; i < n; i++) {
+    sum += engine_trace_at(&tr, i)->torque_nm;
+  }
+  CHECK_NEAR(sum / n, st.torque_nm, 0.01 * fabs(st.torque_nm) + 0.01);
+}
+
+/* engine_model_start() resets crank angle to 0, so it drops the old trace. */
+static void test_start_clears_the_trace(void) {
+  EngineConfig cfg = engine_config_default();
+  static EngineTrace tr;
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  st.trace = &tr;
+  st.run_state = ENGINE_STOPPED;
+  st.omega_rad_s = 0.0;
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  EngineTraceSample s = {0};
+  engine_trace_push(&tr, &s);
+  CHECK(engine_trace_count(&tr) == 1);
+  engine_model_start(&st, &cfg, cs);
+  CHECK(engine_trace_count(&tr) == 0);
+}
+
 static const TestCase CASES[] = {
     {"engine_model.init_is_cold_idle", test_init_is_cold_idle},
     {"engine_model.config_defaults_are_positive",
@@ -417,6 +738,26 @@ static const TestCase CASES[] = {
      test_engine_stalls_instead_of_reversing},
     {"engine_model.starter_alone_can_crank_engine_up",
      test_starter_alone_can_crank_engine_up},
+    {"engine_model.phase_offsets_follow_firing_order",
+     test_phase_offsets_follow_firing_order},
+    {"engine_model.phase_offsets_fall_back_on_invalid_firing_order",
+     test_phase_offsets_fall_back_on_invalid_firing_order},
+    {"engine_model.cylinders_fire_in_order_evenly_spaced",
+     test_cylinders_fire_in_order_evenly_spaced},
+    {"engine_model.alternate_firing_order_changes_the_sequence",
+     test_alternate_firing_order_changes_the_sequence},
+    {"engine_model.six_cylinder_spacing", test_six_cylinder_spacing},
+    {"engine_model.staggering_reduces_ripple_and_conserves_mean",
+     test_staggering_reduces_ripple_and_conserves_mean},
+    {"engine_model.inertia_torque_averages_to_zero_over_a_cycle",
+     test_inertia_torque_averages_to_zero_over_a_cycle},
+    {"engine_model.dead_cylinder_drops_its_own_pulse",
+     test_dead_cylinder_drops_its_own_pulse},
+    {"engine_model.trace_does_not_change_the_simulation",
+     test_trace_does_not_change_the_simulation},
+    {"engine_model.trace_total_matches_reported_mean_torque",
+     test_trace_total_matches_reported_mean_torque},
+    {"engine_model.start_clears_the_trace", test_start_clears_the_trace},
 };
 
 RUN_TESTS(CASES)

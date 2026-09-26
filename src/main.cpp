@@ -16,6 +16,7 @@
 #include "model/sync.h"
 #include "physics/engine_model.h"
 #include "physics/engine_spec_io.h"
+#include "physics/engine_trace.h"
 #include "physics/environment.h"
 #include "platform/sdl/sdl_input.h"
 #include "platform/sdl/sdl_time.h"
@@ -36,6 +37,7 @@
 #include "ui/layouts.h"
 #include "ui/readout_panels.h"
 #include "ui/spec_editor_panel.h"
+#include "ui/torque_trace_panel.h"
 #include "ui/trends_panel.h"
 
 /* Initial window size; shrunk to fit the display if it is too big. */
@@ -81,13 +83,15 @@ typedef struct {
   FaultMonitor faults;
   Annunciator ann;
   RunRecorder recorder;
-  char spec_path[512]; /* engine spec in use; empty = built-in default */
+  char spec_path[512];    /* engine spec in use; empty = built-in default */
   int logged_sensor_mode; /* display feed last written to the event log */
   SimClock clock;
-  bool logged_paused;   /* clock state last written to the event log */
+  bool logged_paused; /* clock state last written to the event log */
   int logged_speed_idx;
   Trends trends;
   CylTrends cyl_trends;
+  EngineTrace engine_trace; /* sub-step torque/pressure trace for the Torque
+                             * Ripple panel; attached to state.engine */
   EventLog events;
 
   double ambient_c;
@@ -113,8 +117,7 @@ static void fit_window_to_display(SDL_Window *window) {
       SDL_SetWindowSize(window, w > max_w ? max_w : w, h > max_h ? max_h : h);
     }
   }
-  SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED,
-                        SDL_WINDOWPOS_CENTERED);
+  SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 }
 
 static void acknowledge_alarms(AppState *app) {
@@ -187,6 +190,9 @@ static void reset_simulation_state(AppState *app) {
   app->state.engine.omega_rad_s = 0.0;
   app->state.engine.map_kpa = app->ambient_pressure_kpa; /* not being pumped,
                                                           * so no vacuum */
+  engine_trace_clear(&app->engine_trace);
+  app->state.engine.trace =
+      &app->engine_trace; /* model_state_init() detached it */
   app->display = app->state;
   app->engine_stop_requested = false;
 
@@ -235,7 +241,8 @@ static void recording_start(AppState *app) {
                  (long long)app->recorder.run_id);
 }
 
-/* One row per sampling tick, from the exact model plus a noisy sensor reading. */
+/* One row per sampling tick, from the exact model plus a noisy sensor reading.
+ */
 static void record_sample(AppState *app) {
   SensorReading reading = sensor_read(&app->sensor, &app->state);
   RunLogSample s = {};
@@ -244,9 +251,8 @@ static void record_sample(AppState *app) {
   s.alt_m = app->input.altitude_m;
   s.ambient_c = app->state.env.oat_c;
   s.airspeed_ms = app->input.airspeed_ms;
-  s.cool_index = environment_cool_index(app->state.env.density_kg_m3,
-                                        app->state.env.airspeed_ms,
-                                        app->state.rpm);
+  s.cool_index = environment_cool_index(
+      app->state.env.density_kg_m3, app->state.env.airspeed_ms, app->state.rpm);
   s.state = &app->state;
   s.sensor = &reading;
   run_recorder_write(&app->recorder, &s);
@@ -259,7 +265,8 @@ static void apply_engine_config(AppState *app, const EngineConfig *cfg,
                                 const char *label) {
   const EngineConfig c = *cfg; /* cfg may point into app->sync */
   char name[sizeof app->spec_path];
-  snprintf(name, sizeof name, "%s", label ? label : ""); /* may alias spec_path */
+  snprintf(name, sizeof name, "%s",
+           label ? label : ""); /* may alias spec_path */
 
   ModelSync fresh;
   model_sync_init(&fresh);
@@ -419,7 +426,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
       event->key.key == SDLK_G) {
     app->panels.gamepad = !app->panels.gamepad;
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "PANEL",
-                   "gamepad panel %s", app->panels.gamepad ? "shown" : "hidden");
+                   "gamepad panel %s",
+                   app->panels.gamepad ? "shown" : "hidden");
   }
 
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
@@ -602,10 +610,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         ImGui::SetTooltip("Cold-start the engine. Clears injected faults,\n"
                           "trends and alarms, and ends any recording.");
       }
-      ImGui::TextDisabled("  engine: %s",
-                          app->spec_path[0] ? app->spec_path : "built-in default");
+      ImGui::TextDisabled("  engine: %s", app->spec_path[0]
+                                              ? app->spec_path
+                                              : "built-in default");
       ImGui::Separator();
-      if (ImGui::MenuItem("Quit")) {
+      if (ImGui::MenuItem("Quit", "Alt+F4")) {
         app->quit_requested = true;
       }
       ImGui::EndMenu();
@@ -634,6 +643,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("Cylinders", NULL, &app->panels.cylinders);
       ImGui::MenuItem("Trends", NULL, &app->panels.trends);
       ImGui::MenuItem("Cylinder Trends", NULL, &app->panels.cyl_trends);
+      ImGui::MenuItem("Torque Ripple", NULL, &app->panels.torque_trace);
       ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
       ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
       ImGui::Separator();
@@ -657,7 +667,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   if (app->panels.sim) {
     sim_panel_draw(&app->panels.sim, shown, app->sync.sim_time_s,
-                   app->input.throttle, fps, app->sensor_mode != 0, &app->clock);
+                   app->input.throttle, fps, app->sensor_mode != 0,
+                   &app->clock);
   }
   if (app->panels.engine_spec) {
     engine_spec_panel_draw(&app->panels.engine_spec, &app->sync,
@@ -703,6 +714,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     cyl_trends_panel_draw(&app->panels.cyl_trends, &app->cyl_trends,
                           app->sync.engine_config.num_cylinders,
                           SAMPLE_PERIOD_S);
+  }
+  if (app->panels.torque_trace) {
+    torque_trace_panel_draw(&app->panels.torque_trace, &app->engine_trace,
+                            &app->sync.engine_config);
   }
   if (app->panels.event_log) {
     event_log_panel_draw(&app->panels.event_log, &app->events);

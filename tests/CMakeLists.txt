@@ -29,6 +29,7 @@ set(ENGINE_CORE_TESTS
   test_history
   test_trends
   test_crank_thermo
+  test_engine_trace
   test_run_log
 )
 
