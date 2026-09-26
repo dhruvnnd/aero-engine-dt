@@ -15,6 +15,8 @@
 #define PANEL_TRENDS "Trends"
 #define PANEL_CYL_TRENDS "Cylinder Trends"
 #define PANEL_TORQUE_TRACE "Torque Ripple"
+#define PANEL_ECU "ECU"
+#define PANEL_ECU_TRENDS "ECU Trends"
 #define PANEL_EVENT_LOG "Event Log"
 #define PANEL_GAMEPAD "Gamepad / Input Map"
 

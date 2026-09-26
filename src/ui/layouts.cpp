@@ -47,6 +47,8 @@ PanelVisibility layout_visibility(int id) {
   v.faults = true;
   v.cyl_trends = true; /* a tab beside Trends / Cylinders */
   v.torque_trace = true;
+  v.ecu = true;
+  v.ecu_trends = true;
   return v;
 }
 
@@ -94,10 +96,11 @@ void layout_apply(int id, ImVec2 size) {
     /* big trends on the left; instruments over a tab group on the right */
     ImGuiID right = carve(rest, ImGuiDir_Right, 0.32f);
     ImGuiID right_bottom = carve(right, ImGuiDir_Down, 0.45f);
-    DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE);
+    DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE,
+         PANEL_ECU_TRENDS);
     DOCK(right, PANEL_INSTRUMENTS);
     DOCK(right_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
-         PANEL_CONTROLS, PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD,
+         PANEL_CONTROLS, PANEL_ECU, PANEL_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD,
          PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
     break;
   }
@@ -107,9 +110,10 @@ void layout_apply(int id, ImVec2 size) {
     ImGuiID cylinders = carve(rest, ImGuiDir_Up, 0.45f);
     ImGuiID environment = carve(rest, ImGuiDir_Up, 0.35f);
     DOCK(left, PANEL_INSTRUMENTS);
-    DOCK(cylinders, PANEL_CYLINDERS, PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE);
+    DOCK(cylinders, PANEL_CYLINDERS, PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE,
+         PANEL_ECU_TRENDS);
     DOCK(environment, PANEL_ENVIRONMENT);
-    DOCK(rest, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS, PANEL_EVENT_LOG,
+    DOCK(rest, PANEL_SIM, PANEL_CONTROLS, PANEL_ECU, PANEL_FAULTS, PANEL_EVENT_LOG,
          PANEL_GAMEPAD,
          PANEL_TRENDS, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
     break;
@@ -121,9 +125,9 @@ void layout_apply(int id, ImVec2 size) {
     ImGuiID left_bottom = carve(rest, ImGuiDir_Down, 0.40f);
     DOCK(rest, PANEL_EVENT_LOG);
     DOCK(left_bottom, PANEL_INSTRUMENTS, PANEL_CYLINDERS, PANEL_TRENDS,
-         PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE);
+         PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE, PANEL_ECU_TRENDS);
     DOCK(right, PANEL_GAMEPAD);
-    DOCK(right_bottom, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS,
+    DOCK(right_bottom, PANEL_SIM, PANEL_CONTROLS, PANEL_ECU, PANEL_FAULTS,
          PANEL_ENVIRONMENT, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
     break;
   }
@@ -136,7 +140,7 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(rest, PANEL_SPEC_EDITOR);
     DOCK(bottom, PANEL_EVENT_LOG, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS,
          PANEL_INSTRUMENTS, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_TRENDS,
-         PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE, PANEL_GAMEPAD);
+         PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE, PANEL_ECU, PANEL_ECU_TRENDS, PANEL_GAMEPAD);
     break;
   }
   case LAYOUT_OVERVIEW:
@@ -147,8 +151,10 @@ void layout_apply(int id, ImVec2 size) {
     ImGuiID right_bottom = carve(rest, ImGuiDir_Down, 0.28f);
     DOCK(left, PANEL_INSTRUMENTS);
     DOCK(left_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
-         PANEL_CONTROLS, PANEL_FAULTS, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
-    DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE);
+         PANEL_CONTROLS, PANEL_ECU, PANEL_FAULTS, PANEL_ENGINE_SPEC,
+         PANEL_SPEC_EDITOR);
+    DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE,
+         PANEL_ECU_TRENDS);
     DOCK(right_bottom, PANEL_EVENT_LOG, PANEL_GAMEPAD);
     break;
   }

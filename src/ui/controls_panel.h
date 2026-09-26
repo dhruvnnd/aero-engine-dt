@@ -8,11 +8,13 @@
 struct ControlActions {
   bool start_engine;
   bool stop_engine;
+  bool toggle_idle_governor;
 };
 
 /* Dockable mouse controls for everything the keyboard and gamepad drive:
- * engine start / stop, throttle, altitude, airspeed and OAT offset sliders,
- * a flight-condition reset, and the display-feed switch. Sliders write
+ * engine start / stop, the idle-governor switch, throttle, altitude, airspeed
+ * and OAT offset sliders, a flight-condition reset, and the display-feed
+ * switch. Sliders write
  * straight into `input`; `*sensor_mode` is 1 for the noisy sensor feed, 0 for
  * the exact model. `open` is cleared when the user closes the window. */
 ControlActions controls_panel_draw(bool *open, SdlInputState *input,

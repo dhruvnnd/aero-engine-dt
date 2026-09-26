@@ -66,6 +66,23 @@ ControlActions controls_panel_draw(bool *open, SdlInputState *input,
   }
   ImGui::EndDisabled();
 
+  const EcuState &ecu = s->engine.ecu;
+  ImGui::BeginDisabled(ecu.idle_mode == ECU_IDLE_DISABLED);
+  bool governor_on = ecu.idle_enabled != 0;
+  if (ImGui::Checkbox("Idle governor  (K)", &governor_on)) {
+    act.toggle_idle_governor = true;
+  }
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip(ecu.idle_mode == ECU_IDLE_DISABLED
+                          ? "No governor configured (idle_target_rpm = 0)."
+                          : "The ECU holds idle speed by adding throttle.\n"
+                            "Off: idle falls to the engine's natural speed.\n"
+                            "See the ECU panel for the loop.");
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled("%s", ecu_idle_mode_name(ecu.idle_mode));
+
   ImGui::Separator();
   if (ImGui::BeginTable("sliders", 2)) {
     ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed,
