@@ -49,10 +49,10 @@ static void test_table_rows_are_well_formed(void) {
 /* Every double in EngineConfig must have a row. If this fails, a double was
  * added to EngineConfig (or EngineGeometry) without a row in
  * ENGINE_CONFIG_FIELDS -- add one, or the spec file, the editor and the
- * validator will silently ignore it. (num_cylinders and firing_order are the
+ * validator will silently ignore it. (num_cylinders, firing_order and ecu_fitted are the
  * non-table members.) */
 static void test_every_double_in_the_struct_has_a_row(void) {
-  const size_t ints = (size_t)(1 + ENGINE_MAX_CYLINDERS) * sizeof(int);
+  const size_t ints = (size_t)(2 + ENGINE_MAX_CYLINDERS) * sizeof(int);
   const size_t int_block = (ints + alignof(double) - 1) / alignof(double) *
                            alignof(double);
   const size_t expected =

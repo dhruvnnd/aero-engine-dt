@@ -66,9 +66,16 @@ static bool begin_time_plot(const char *title, const char *y_label,
 }
 
 void ecu_trends_panel_draw(bool *open, const EcuTrends *t,
-                           const EngineConfig *cfg, double sample_period_s) {
+                           const EngineConfig *cfg, bool fitted,
+                           double sample_period_s) {
   ImGui::SetNextWindowSize(ImVec2(720.0f, 720.0f), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin(PANEL_ECU_TRENDS, open)) {
+    ImGui::End();
+    return;
+  }
+
+  if (!fitted) {
+    ImGui::TextDisabled("No ECU fitted.");
     ImGui::End();
     return;
   }
@@ -103,7 +110,7 @@ void ecu_trends_panel_draw(bool *open, const EcuTrends *t,
       ImPlot::EndPlot();
     }
     if (begin_time_plot("Governor terms", "% throttle", max_span, dt, true)) {
-      hline("##limit", cfg->idle_max_throttle * 100.0,
+      hline("##limit", cfg->ecu.idle_max_throttle * 100.0,
             ImVec4(1.0f, 0.35f, 0.30f, 0.85f));
       hline("##zero", 0.0, ImVec4(1.0f, 1.0f, 1.0f, 0.25f));
       line("P", &src->hist[ECUM_P_TERM], dt, COL_CAUTION);

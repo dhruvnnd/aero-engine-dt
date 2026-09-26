@@ -246,7 +246,7 @@ static ModelState idle_state(int ncyl, double target_rpm, double alt_m,
   model_sync_init(&sync);
   sync.engine_config.num_cylinders = ncyl;
   engine_default_firing_order(ncyl, sync.engine_config.firing_order);
-  sync.engine_config.idle_target_rpm = target_rpm;
+  sync.engine_config.ecu.idle_target_rpm = target_rpm;
   model_sync_apply_engine_config(&sync, &sync.engine_config);
   ModelState st;
   model_state_init(&st, &sync.engine_config, 15.0);
@@ -278,7 +278,7 @@ static void test_idle_no_longer_runs_away_with_cylinder_count(void) {
     ModelState governed = idle_state(n, 800.0, 0.0, 0);
     CHECK(governed.engine.run_state == ENGINE_RUNNING);
     CHECK_NEAR(governed.rpm, 800.0, 25.0);
-    CHECK(governed.engine.ecu.idle_throttle < 0.15);
+    CHECK(governed.ecu.idle_throttle < 0.15);
   }
 }
 

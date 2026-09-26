@@ -195,11 +195,6 @@ EngineConfig engine_config_default(void) {
   cfg.friction_fmep_const_kpa = 40.0;
   cfg.friction_fmep_per_ms_kpa = 14.0;
 
-  cfg.idle_target_rpm = 800.0;
-  cfg.idle_kp = 0.0003;
-  cfg.idle_ki = 0.0003;
-  cfg.idle_max_throttle = 0.15;
-
   /* Inline-four, 1-3-4-2 firing order */
   cfg.num_cylinders = 4;
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
@@ -210,12 +205,15 @@ EngineConfig engine_config_default(void) {
   cfg.firing_order[2] = 4;
   cfg.firing_order[3] = 2;
 
+  cfg.ecu_fitted = 1;
+
   cfg.geom = engine_geometry_default();
 
   cfg.starter_torque_nm = 25.0;
   cfg.starter_catch_rpm = 800.0;
 
   cfg.prop = prop_config_default();
+  cfg.ecu = ecu_config_default();
 
   return cfg;
 }
@@ -228,7 +226,6 @@ void engine_model_init(EngineState *state, const EngineConfig *config) {
   state->torque_nm = 0.0;
   state->run_state = ENGINE_RUNNING;
   state->ignition_on = 1;
-  ecu_init(&state->ecu);
   state->trace = NULL;
 }
 
@@ -246,7 +243,6 @@ void engine_model_start(EngineState *state, const EngineConfig *config,
   state->torque_nm = 0.0;
   state->run_state = ENGINE_CRANKING;
   state->ignition_on = 1;
-  ecu_reset_idle(&state->ecu); /* the operator's governor switch is kept */
   if (state->trace) {
     engine_trace_clear(state->trace); /* crank angle just jumped back to 0 */
   }
@@ -265,20 +261,6 @@ void engine_model_stop(EngineState *state) {
   /* Already ENGINE_STOPPED: no-op. */
 }
 
-/* The ECU's throttle command for this frame. Runs before the stopped early-out
- * so a stopped engine reports the governor as standing by. */
-static double ecu_throttle_command(EngineState *state, const EngineConfig *cfg,
-                                   double pilot_throttle, double dt) {
-  EcuIdleParams p;
-  p.target_rpm = cfg->idle_target_rpm;
-  p.kp = cfg->idle_kp;
-  p.ki = cfg->idle_ki;
-  p.max_throttle = cfg->idle_max_throttle;
-  return ecu_step(&state->ecu, &p, state->run_state == ENGINE_RUNNING,
-                  state->ignition_on, engine_model_rpm(state), pilot_throttle,
-                  dt);
-}
-
 #define ENGINE_SUB_STEP_DEG 1.0
 #define ENGINE_SUB_STEP_MAX_S 0.0005
 
@@ -287,8 +269,6 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
                        const CylinderConfig *cylinders,
                        CylinderState *cyl_states, double intake_temp_c,
                        double t, double dt) {
-  const double throttle_cmd =
-      ecu_throttle_command(state, config, input->throttle, dt);
   if (state->run_state == ENGINE_STOPPED) {
     state->torque_nm = 0.0;
     /* nothing is pumping the manifold any more: it equalises with ambient, so
@@ -310,7 +290,7 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
   }
 
   EngineDerivParams params;
-  params.throttle = throttle_cmd;
+  params.throttle = input->throttle;
   params.load_torque_nm = input->load_torque_nm;
   params.ambient_pressure_kpa = input->ambient_pressure_kpa;
   params.inertia_kg_m2 = config->inertia_kg_m2;
@@ -441,6 +421,11 @@ int engine_config_check(const EngineConfig *cfg,
               i, cfg->firing_order[i], cfg->num_cylinders);
       }
     }
+  }
+
+  if (cfg->ecu_fitted != 0 && cfg->ecu_fitted != 1) {
+    ISSUE("ecu_fitted = %d: must be 0 (no ECU) or 1 (ECU fitted)",
+          cfg->ecu_fitted);
   }
 
   /* per-parameter ranges come from the field table */

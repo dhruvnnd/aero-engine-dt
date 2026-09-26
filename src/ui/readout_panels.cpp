@@ -136,8 +136,10 @@ void instruments_panel_draw(bool *open, const ModelState *s) {
     instrument_row("manifold press.", s->engine.map_kpa, 1.0, "kPa", 1, NULL,
                    CHANNEL_OK);
     instrument_row("torque", s->torque_nm, 1.0, "N.m", 1, NULL, CHANNEL_OK);
-    instrument_row("idle governor", s->engine.ecu.idle_throttle, 100.0, "% thr",
-                   1, NULL, CHANNEL_OK);
+    if (s->ecu.fitted) {
+      instrument_row("idle governor", s->ecu.idle_throttle, 100.0, "% thr", 1,
+                     NULL, CHANNEL_OK);
+    }
     instrument_row("prop load", s->prop.torque_nm, 1.0, "N.m", 1, NULL,
                    CHANNEL_OK);
     instrument_row("prop thrust", s->prop.thrust_n, 1.0, "N", 0, NULL,

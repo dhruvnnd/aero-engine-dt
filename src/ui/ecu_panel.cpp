@@ -85,7 +85,18 @@ EcuActions ecu_panel_draw(bool *open, const ModelState *s,
     ImGui::End();
     return act;
   }
-  const EcuState &e = s->engine.ecu;
+  const EcuState &e = s->ecu;
+
+  if (!e.fitted) {
+    ImGui::TextDisabled("No ECU fitted.");
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(COL_DIM,
+                       "The pilot's throttle drives the engine directly. Set "
+                       "ecu_fitted = 1 in the engine spec to fit one.");
+    ImGui::PopTextWrapPos();
+    ImGui::End();
+    return act;
+  }
 
   ImGui::TextDisabled("idle governor");
   ImGui::SameLine();
@@ -123,8 +134,8 @@ EcuActions ecu_panel_draw(bool *open, const ModelState *s,
   /* How much of the governor's range is spent. A rising baseline at the same
    * conditions means the engine needs more help to idle: the ECU is
    * compensating for something. */
-  const float used = cfg->idle_max_throttle > 0.0
-                         ? (float)(e.idle_throttle / cfg->idle_max_throttle)
+  const float used = cfg->ecu.idle_max_throttle > 0.0
+                         ? (float)(e.idle_throttle / cfg->ecu.idle_max_throttle)
                          : 0.0f;
   char overlay[48];
   snprintf(overlay, sizeof overlay, "authority used %.0f %%", used * 100.0f);

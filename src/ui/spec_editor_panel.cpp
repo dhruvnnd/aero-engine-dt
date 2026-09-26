@@ -14,7 +14,7 @@ static const ImVec4 COL_CAUTION(1.00f, 0.75f, 0.20f, 1.0f);
 static const ImVec4 COL_WARNING(1.00f, 0.35f, 0.30f, 1.0f);
 
 static bool config_equal(const EngineConfig &a, const EngineConfig &b) {
-  if (a.num_cylinders != b.num_cylinders) {
+  if (a.num_cylinders != b.num_cylinders || a.ecu_fitted != b.ecu_fitted) {
     return false;
   }
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
@@ -283,6 +283,17 @@ SpecEditorResult spec_editor_panel_draw(bool *open, const EngineConfig *running,
       continue;
     }
     ImGui::PushID(gi);
+    /* whether the engine has an ECU at all; its settings only matter if so */
+    const bool ecu_group = gi == ENGINE_CONFIG_GROUP_ECU;
+    if (ecu_group) {
+      bool fitted = g.draft.ecu_fitted != 0;
+      if (ImGui::Checkbox("ECU fitted", &fitted)) {
+        g.draft.ecu_fitted = fitted ? 1 : 0;
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled("(off: the pilot's throttle drives the engine)");
+    }
+    ImGui::BeginDisabled(ecu_group && !g.draft.ecu_fitted);
     if (ImGui::BeginTable("fields", 3)) {
       ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed,
                               ImGui::GetFontSize() * 14.0f);
@@ -337,6 +348,7 @@ SpecEditorResult spec_editor_panel_draw(bool *open, const EngineConfig *running,
       }
       ImGui::EndTable();
     }
+    ImGui::EndDisabled();
     ImGui::PopID();
   }
   ImGui::TextDisabled("Ctrl+click a slider to type a value; amber = outside "

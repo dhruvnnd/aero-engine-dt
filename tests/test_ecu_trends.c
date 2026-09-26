@@ -9,9 +9,9 @@ static EcuTrends U;
 
 static void fill_state(ModelState *s, double rpm, double pilot) {
   memset(s, 0, sizeof *s);
-  ecu_init(&s->engine.ecu);
+  ecu_init(&s->ecu);
   s->rpm = rpm;
-  EcuState *e = &s->engine.ecu;
+  EcuState *e = &s->ecu;
   e->idle_target_rpm = 800.0;
   e->pilot_throttle = pilot;
   e->idle_throttle = 0.08;

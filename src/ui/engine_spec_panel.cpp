@@ -102,6 +102,9 @@ void engine_spec_panel_draw(bool *open, const ModelSync *sync,
     }
     ImGui::PushID(gi);
     if (begin_table("params")) {
+      if (gi == ENGINE_CONFIG_GROUP_ECU) {
+        row_text("ECU fitted", e.ecu_fitted ? "yes" : "no", "");
+      }
       for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
         const ConfigField &f = ENGINE_CONFIG_FIELDS[i];
         if (f.group == gi) {

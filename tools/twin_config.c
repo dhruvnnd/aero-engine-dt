@@ -140,6 +140,7 @@ static int cmd_check(const char *path) {
   printf("\n");
   printf("firing interval              = %.1f deg (720 / num_cylinders)\n",
          720.0 / cfg.num_cylinders);
+  printf("%-31s = %d\n", "ecu_fitted", cfg.ecu_fitted);
   for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
     const ConfigField *f = &ENGINE_CONFIG_FIELDS[i];
     printf("%-31s = %.6g%s%s\n", f->key, *engine_config_field_cptr(&cfg, f),

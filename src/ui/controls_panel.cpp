@@ -66,22 +66,27 @@ ControlActions controls_panel_draw(bool *open, SdlInputState *input,
   }
   ImGui::EndDisabled();
 
-  const EcuState &ecu = s->engine.ecu;
-  ImGui::BeginDisabled(ecu.idle_mode == ECU_IDLE_DISABLED);
+  const EcuState &ecu = s->ecu;
+  const bool governor_available =
+      ecu.fitted && ecu.idle_mode != ECU_IDLE_DISABLED;
+  ImGui::BeginDisabled(!governor_available);
   bool governor_on = ecu.idle_enabled != 0;
   if (ImGui::Checkbox("Idle governor  (K)", &governor_on)) {
     act.toggle_idle_governor = true;
   }
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-    ImGui::SetTooltip(ecu.idle_mode == ECU_IDLE_DISABLED
+    ImGui::SetTooltip(!ecu.fitted
+                          ? "No ECU fitted (ecu_fitted = 0)."
+                      : ecu.idle_mode == ECU_IDLE_DISABLED
                           ? "No governor configured (idle_target_rpm = 0)."
                           : "The ECU holds idle speed by adding throttle.\n"
                             "Off: idle falls to the engine's natural speed.\n"
                             "See the ECU panel for the loop.");
   }
   ImGui::SameLine();
-  ImGui::TextDisabled("%s", ecu_idle_mode_name(ecu.idle_mode));
+  ImGui::TextDisabled("%s",
+                      ecu.fitted ? ecu_idle_mode_name(ecu.idle_mode) : "NO ECU");
 
   ImGui::Separator();
   if (ImGui::BeginTable("sliders", 2)) {

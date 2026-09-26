@@ -42,11 +42,6 @@ typedef struct {
   EngineRunState run_state;
   int ignition_on;
 
-  /* The engine control unit (physics/ecu.h): the idle governor's loop state
-   * and the throttle command the engine received. Configured by
-   * EngineConfig.idle_*; the operator switch is ecu.idle_enabled. */
-  EcuState ecu;
-
   EngineTrace *trace;
 } EngineState;
 
@@ -65,25 +60,23 @@ typedef struct {
   double friction_fmep_const_kpa;
   double friction_fmep_per_ms_kpa;
 
-  /* Idle governor: an ECU-style closed loop that holds idle_target_rpm by
-   * adding throttle while the engine runs */
-  double idle_target_rpm;
-  double idle_kp;           /* throttle per rpm of error */
-  double idle_ki;           /* throttle per rpm of error per second */
-  double idle_max_throttle; /* governor authority, 0..1 of throttle */
-
   /* Engine geometry. num_cylinders is the active count (<=
    * ENGINE_MAX_CYLINDERS); firing_order lists 1-based cylinder numbers in the
    * order they fire, with unused trailing slots left 0. */
   int num_cylinders;
   int firing_order[ENGINE_MAX_CYLINDERS];
 
+  /* 1 if this engine has an ECU, 0 if the pilot's throttle drives it directly
+   */
+  int ecu_fitted;
+
   EngineGeometry geom;
 
   double starter_torque_nm;
   double starter_catch_rpm;
 
-  PropConfig prop; /* direct-drive fixed-pitch propeller, see propeller.h */
+  PropConfig prop;
+  EcuConfig ecu;
 } EngineConfig;
 
 EngineConfig engine_config_default(void);

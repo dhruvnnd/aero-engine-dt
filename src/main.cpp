@@ -179,7 +179,12 @@ static void engine_stop(AppState *app) {
 
 /* The operator switch for the ECU's idle governor. */
 static void idle_governor_toggle(AppState *app) {
-  EcuState *ecu = &app->state.engine.ecu;
+  EcuState *ecu = &app->state.ecu;
+  if (!ecu->fitted) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                   "no ECU fitted (ecu_fitted = 0 in the engine spec)");
+    return;
+  }
   if (ecu->idle_mode == ECU_IDLE_DISABLED) {
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
                    "no idle governor configured (idle_target_rpm = 0)");
@@ -219,7 +224,7 @@ static void reset_simulation_state(AppState *app) {
   trends_init(&app->trends);
   cyl_trends_init(&app->cyl_trends);
   ecu_trends_init(&app->ecu_trends);
-  app->logged_ecu_mode = app->state.engine.ecu.idle_mode;
+  app->logged_ecu_mode = app->state.ecu.idle_mode;
   app->sample_accum_s = 0.0;
 
   event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
@@ -567,14 +572,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   /* ECU events worth a log line: the governor running out of authority (and
    * recovering). The rest of its transitions follow the pilot's throttle and
    * would only add noise. */
-  const EcuIdleMode ecu_mode = app->state.engine.ecu.idle_mode;
+  const EcuIdleMode ecu_mode = app->state.ecu.idle_mode;
   if (ecu_mode != app->logged_ecu_mode) {
     if (ecu_mode == ECU_IDLE_LIMITED) {
       event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION, "ECU",
                      "idle governor at its authority limit -- %.0f rpm below "
                      "the %.0f rpm target",
-                     app->state.engine.ecu.idle_error_rpm,
-                     app->state.engine.ecu.idle_target_rpm);
+                     app->state.ecu.idle_error_rpm,
+                     app->state.ecu.idle_target_rpm);
     } else if (app->logged_ecu_mode == ECU_IDLE_LIMITED &&
                ecu_mode == ECU_IDLE_ACTIVE) {
       event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
@@ -775,7 +780,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   }
   if (app->panels.ecu_trends) {
     ecu_trends_panel_draw(&app->panels.ecu_trends, &app->ecu_trends,
-                          &app->sync.engine_config, SAMPLE_PERIOD_S);
+                          &app->sync.engine_config,
+                          app->sync.engine_config.ecu_fitted != 0,
+                          SAMPLE_PERIOD_S);
   }
   if (app->panels.torque_trace) {
     torque_trace_panel_draw(&app->panels.torque_trace, &app->engine_trace,

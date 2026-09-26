@@ -1,6 +1,7 @@
 #include "test_util.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "physics/engine_model.h"
 #include "physics/engine_spec_io.h"
@@ -142,10 +143,10 @@ static void test_friction_and_idle_fields_round_trip(void) {
   cfg.friction_fmep_const_kpa = 55.0;
   cfg.friction_fmep_per_ms_kpa = 11.5;
   cfg.friction_coeff_nm_per_rad_s = 0.031;
-  cfg.idle_target_rpm = 950.0;
-  cfg.idle_kp = 0.0005;
-  cfg.idle_ki = 0.0004;
-  cfg.idle_max_throttle = 0.2;
+  cfg.ecu.idle_target_rpm = 950.0;
+  cfg.ecu.idle_kp = 0.0005;
+  cfg.ecu.idle_ki = 0.0004;
+  cfg.ecu.idle_max_throttle = 0.2;
 
   CHECK(engine_spec_save(TMP_PATH, &cfg) == 0);
 
@@ -156,23 +157,92 @@ static void test_friction_and_idle_fields_round_trip(void) {
   CHECK_NEAR(loaded.friction_fmep_const_kpa, 55.0, 1e-9);
   CHECK_NEAR(loaded.friction_fmep_per_ms_kpa, 11.5, 1e-9);
   CHECK_NEAR(loaded.friction_coeff_nm_per_rad_s, 0.031, 1e-9);
-  CHECK_NEAR(loaded.idle_target_rpm, 950.0, 1e-9);
-  CHECK_NEAR(loaded.idle_kp, 0.0005, 1e-9);
-  CHECK_NEAR(loaded.idle_ki, 0.0004, 1e-9);
-  CHECK_NEAR(loaded.idle_max_throttle, 0.2, 1e-9);
+  CHECK_NEAR(loaded.ecu.idle_target_rpm, 950.0, 1e-9);
+  CHECK_NEAR(loaded.ecu.idle_kp, 0.0005, 1e-9);
+  CHECK_NEAR(loaded.ecu.idle_ki, 0.0004, 1e-9);
+  CHECK_NEAR(loaded.ecu.idle_max_throttle, 0.2, 1e-9);
 
   remove(TMP_PATH);
 }
 
+/* Whether the engine has an ECU at all is its own spec key. */
+static void test_ecu_fitted_round_trips_and_defaults_to_fitted(void) {
+  EngineConfig cfg = engine_config_default();
+  CHECK(cfg.ecu_fitted == 1);
+
+  cfg.ecu_fitted = 0;
+  CHECK(engine_spec_save(TMP_PATH, &cfg) == 0);
+  EngineConfig loaded;
+  EngineSpecResult r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(r.status == ENGINE_SPEC_OK);
+  CHECK(r.unknown_keys == 0);
+  CHECK(loaded.ecu_fitted == 0);
+
+  /* a spec that never mentions it keeps the default: fitted */
+  write_raw("num_cylinders = 4\nfiring_order = 1,3,4,2\n");
+  r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(r.status == ENGINE_SPEC_OK);
+  CHECK(loaded.ecu_fitted == 1);
+
+  write_raw("ecu_fitted = 0\n");
+  r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(loaded.ecu_fitted == 0);
+  CHECK_NEAR(loaded.ecu.idle_target_rpm, cfg.ecu.idle_target_rpm, 1e-12);
+
+  write_raw("ecu_fitted = maybe\n");
+  r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(r.status == ENGINE_SPEC_ERR_PARSE);
+
+  remove(TMP_PATH);
+}
+
+static void test_validate_ecu_fitted_is_a_switch(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.ecu_fitted = 0;
+  CHECK(engine_config_validate(&cfg, NULL) == 0);
+  cfg.ecu_fitted = 1;
+  CHECK(engine_config_validate(&cfg, NULL) == 0);
+  cfg.ecu_fitted = 2;
+  CHECK(engine_config_validate(&cfg, NULL) == 1);
+  cfg.ecu_fitted = -1;
+  CHECK(engine_config_validate(&cfg, NULL) == 1);
+}
+
+/* The saved file puts ecu_fitted at the top of the ECU section, before the
+ * governor settings. */
+static void test_saved_spec_has_ecu_fitted_in_the_ecu_section(void) {
+  const EngineConfig cfg = engine_config_default();
+  CHECK(engine_spec_save(TMP_PATH, &cfg) == 0);
+  FILE *fp = fopen(TMP_PATH, "r");
+  CHECK(fp != NULL);
+  if (!fp) {
+    return;
+  }
+  static char text[32768];
+  const size_t n = fread(text, 1, sizeof text - 1, fp);
+  text[n] = '\0';
+  fclose(fp);
+  remove(TMP_PATH);
+
+  const char *section = strstr(text, "# --- ECU ---");
+  const char *fitted = strstr(text, "\necu_fitted = 1");
+  const char *target = strstr(text, "\nidle_target_rpm = ");
+  CHECK(section != NULL && fitted != NULL && target != NULL);
+  if (section && fitted && target) {
+    CHECK(section < fitted);
+    CHECK(fitted < target);
+  }
+}
+
 static void test_validate_idle_and_friction_values(void) {
   EngineConfig cfg = engine_config_default();
-  cfg.idle_target_rpm = 0.0; /* governor off is allowed */
+  cfg.ecu.idle_target_rpm = 0.0; /* governor off is allowed */
   cfg.friction_fmep_const_kpa = 0.0;
   CHECK(engine_config_validate(&cfg, NULL) == 0);
 
   cfg = engine_config_default();
-  cfg.idle_max_throttle = 1.5;
-  cfg.idle_kp = -0.1;
+  cfg.ecu.idle_max_throttle = 1.5;
+  cfg.ecu.idle_kp = -0.1;
   cfg.friction_fmep_per_ms_kpa = -1.0;
   CHECK(engine_config_validate(&cfg, NULL) >= 3);
 }
@@ -293,6 +363,12 @@ static const TestCase CASES[] = {
      test_validate_flags_bad_prop_values},
     {"engine_spec_io.friction_and_idle_fields_round_trip",
      test_friction_and_idle_fields_round_trip},
+    {"engine_spec_io.ecu_fitted_round_trips_and_defaults_to_fitted",
+     test_ecu_fitted_round_trips_and_defaults_to_fitted},
+    {"engine_spec_io.validate_ecu_fitted_is_a_switch",
+     test_validate_ecu_fitted_is_a_switch},
+    {"engine_spec_io.saved_spec_has_ecu_fitted_in_the_ecu_section",
+     test_saved_spec_has_ecu_fitted_in_the_ecu_section},
     {"engine_spec_io.validate_idle_and_friction_values",
      test_validate_idle_and_friction_values},
     {"engine_spec_io.missing_keys_fall_back_to_default",

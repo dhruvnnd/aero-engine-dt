@@ -360,9 +360,7 @@ static void test_engine_stalls_instead_of_reversing(void) {
   EngineInput normal_in = make_input(0.7, 10.0, 101.325);
   run(&st, cyl_states, &cfg, &normal_in, 3.0, 0.02);
   CHECK(st.run_state == ENGINE_RUNNING);
-  /* the idle governor holds the target (= catch speed here), so "above the
-   * catch speed" is really "at it" */
-  CHECK(engine_model_rpm(&st) > 0.9 * cfg.starter_catch_rpm);
+  CHECK(engine_model_rpm(&st) > cfg.starter_catch_rpm);
 
   /* And a second engine_model_start() call while already running is a
    * documented no-op (matches a real ignition switch). */
@@ -394,9 +392,9 @@ static void test_starter_alone_can_crank_engine_up(void) {
   run(&st, cyl_states, &cfg, &in, 3.0, 0.02);
 
   CHECK(st.run_state == ENGINE_RUNNING);
-  /* the idle governor's target equals the catch speed by default, so it holds
-   * the engine there rather than above it */
-  CHECK(engine_model_rpm(&st) > 0.9 * cfg.starter_catch_rpm);
+  /* With no governor and the throttle closed, the engine sags below the catch
+   * speed to its natural idle after the starter lets go, but it keeps running. */
+  CHECK(engine_model_rpm(&st) > 300.0);
 }
 
 /* ---- Phase 2: firing order, phase offsets, torque ripple ---- */
@@ -726,7 +724,6 @@ static void test_start_clears_the_trace(void) {
  * pumping loop. */
 static double motored_mean_torque_nm(double throttle, double map0_kpa) {
   EngineConfig cfg = engine_config_default();
-  cfg.idle_target_rpm = 0.0;
   static EngineTrace tr;
   EngineState st;
   engine_model_init(&st, &cfg);
@@ -803,223 +800,10 @@ static void test_friction_grows_with_speed_and_vanishes_at_rest(void) {
   CHECK(engine_friction_torque_nm(&cfg, rpm_to_rad_s(50.0)) > 3.0);
 }
 
-static EngineConfig idle_cfg(double target_rpm) {
-  EngineConfig cfg = engine_config_default();
-  cfg.idle_target_rpm = target_rpm;
-  return cfg;
-}
-
-/* Settled closed-throttle engine (no prop at this level, so a small flat load
- * stands in for it). Returns the state after `seconds`. */
-static EngineState idle_run(const EngineConfig *cfg, double load_nm,
-                            double seconds) {
-  EngineState st;
-  engine_model_init(&st, cfg);
-  CylinderState cs[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(cs);
-  EngineInput in = make_input(0.0, load_nm, 101.325);
-  run(&st, cs, cfg, &in, seconds, 0.02);
-  return st;
-}
-
-static void test_idle_governor_holds_the_target(void) {
-  for (double target = 700.0; target <= 1100.0; target += 200.0) {
-    EngineConfig cfg = idle_cfg(target);
-    EngineState st = idle_run(&cfg, 4.0, 40.0);
-    CHECK(st.run_state == ENGINE_RUNNING);
-    CHECK_NEAR(engine_model_rpm(&st), target, 20.0);
-    CHECK(st.ecu.idle_throttle > 0.0);
-    CHECK(st.ecu.idle_throttle < cfg.idle_max_throttle);
-  }
-}
-
-static void test_idle_governor_off_or_pointless_adds_nothing(void) {
-  EngineConfig off = idle_cfg(0.0);
-  EngineState a = idle_run(&off, 1.0, 40.0);
-  CHECK_NEAR(a.ecu.idle_throttle, 0.0, 1e-12);
-  CHECK(a.run_state == ENGINE_RUNNING);
-
-  /* a target below where the engine idles by itself: the governor can only
-   * add throttle, so it stays out of the way and the engine idles naturally */
-  EngineConfig low = idle_cfg(200.0);
-  EngineState b = idle_run(&low, 1.0, 40.0);
-  CHECK_NEAR(b.ecu.idle_throttle, 0.0, 1e-9);
-  CHECK_NEAR(engine_model_rpm(&b), engine_model_rpm(&a), 5.0);
-  CHECK(engine_model_rpm(&b) > 400.0);
-}
-
-/* With the governor a load step at idle is absorbed: the RPM returns to the
- * target and the governor opens up to carry the extra load. */
-static void test_idle_governor_recovers_from_a_load_step(void) {
-  EngineConfig cfg = idle_cfg(800.0);
-  EngineState st;
-  engine_model_init(&st, &cfg);
-  CylinderState cs[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(cs);
-  EngineInput light = make_input(0.0, 4.0, 101.325);
-  EngineInput heavy = make_input(0.0, 7.0, 101.325);
-  run(&st, cs, &cfg, &light, 30.0, 0.02);
-  CHECK_NEAR(engine_model_rpm(&st), 800.0, 20.0);
-  double gov_light = st.ecu.idle_throttle;
-
-  run(&st, cs, &cfg, &heavy, 30.0, 0.02);
-  CHECK(st.run_state == ENGINE_RUNNING);
-  CHECK_NEAR(engine_model_rpm(&st), 800.0, 25.0);
-  CHECK(st.ecu.idle_throttle > gov_light);
-}
-
-/* Authority is finite: an overload the governor can't carry leaves RPM below
- * the target with the governor pinned at its limit -- and when the overload
- * goes away the integrator hasn't wound up, so there is no big overshoot. */
-static void test_idle_governor_authority_limit_and_no_windup(void) {
-  EngineConfig cfg = idle_cfg(800.0);
-  EngineState st;
-  engine_model_init(&st, &cfg);
-  CylinderState cs[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(cs);
-  EngineInput overload = make_input(0.0, 12.0, 101.325);
-  run(&st, cs, &cfg, &overload, 30.0, 0.02);
-  CHECK(st.run_state == ENGINE_RUNNING);
-  CHECK(engine_model_rpm(&st) < 750.0);
-  CHECK_NEAR(st.ecu.idle_throttle, cfg.idle_max_throttle, 1e-9);
-  CHECK(st.ecu.idle_i_term <= cfg.idle_max_throttle + 1e-12);
-
-  EngineInput normal = make_input(0.0, 4.0, 101.325);
-  double peak = 0.0;
-  for (int i = 0; i < 1000; i++) { /* 20 s */
-    run(&st, cs, &cfg, &normal, 0.02, 0.02);
-    peak = fmax(peak, engine_model_rpm(&st));
-  }
-  CHECK(peak < 800.0 + 200.0);
-  CHECK_NEAR(engine_model_rpm(&st), 800.0, 25.0);
-}
-
-/* The live operator switch: turning the governor off mid-run lets idle sag to
- * the engine's natural speed (without stalling it); turning it back on brings
- * it home again. */
-static void test_idle_governor_can_be_toggled_during_a_run(void) {
-  EngineConfig cfg = idle_cfg(800.0);
-  EngineState st;
-  engine_model_init(&st, &cfg);
-  CylinderState cs[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(cs);
-  EngineInput in = make_input(0.0, 1.0, 101.325);
-
-  run(&st, cs, &cfg, &in, 30.0, 0.02);
-  CHECK_NEAR(engine_model_rpm(&st), 800.0, 20.0);
-  CHECK(st.ecu.idle_mode == ECU_IDLE_ACTIVE);
-  CHECK(st.ecu.idle_throttle > 0.0);
-
-  ecu_set_idle_enabled(&st.ecu, 0);
-  run(&st, cs, &cfg, &in, 30.0, 0.02);
-  CHECK(st.run_state == ENGINE_RUNNING); /* sags, doesn't stall */
-  CHECK(st.ecu.idle_mode == ECU_IDLE_OFF);
-  CHECK_NEAR(st.ecu.idle_throttle, 0.0, 0.0);
-  CHECK_NEAR(st.ecu.throttle_cmd, 0.0, 0.0);
-  CHECK(engine_model_rpm(&st) < 700.0);
-  CHECK(engine_model_rpm(&st) > 400.0);
-
-  ecu_set_idle_enabled(&st.ecu, 1);
-  run(&st, cs, &cfg, &in, 40.0, 0.02);
-  CHECK(st.ecu.idle_mode == ECU_IDLE_ACTIVE);
-  CHECK_NEAR(engine_model_rpm(&st), 800.0, 20.0);
-}
-
-/* The command the engine receives is the ECU's, and it is what drives MAP. */
-static void test_engine_receives_the_ecu_throttle_command(void) {
-  EngineConfig cfg = idle_cfg(800.0);
-  EngineState st = idle_run(&cfg, 4.0, 30.0);
-  CHECK_NEAR(st.ecu.pilot_throttle, 0.0, 0.0);
-  CHECK(st.ecu.throttle_cmd > 0.05);
-  CHECK_NEAR(st.ecu.throttle_cmd, st.ecu.idle_throttle, 1e-12);
-  /* MAP sits above the closed-throttle value by the governor's opening */
-  double closed_map = 101.325 * 0.2963;
-  CHECK(st.map_kpa > closed_map + 3.0);
-}
-
-/* A stopped engine reports the governor standing by, not a stale loop. */
-static void test_stopped_engine_reports_standby(void) {
-  EngineConfig cfg = idle_cfg(800.0);
-  EngineState st = idle_run(&cfg, 4.0, 20.0);
-  CHECK(st.ecu.idle_mode == ECU_IDLE_ACTIVE);
-  st.run_state = ENGINE_STOPPED;
-  st.omega_rad_s = 0.0;
-  CylinderState cs[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(cs);
-  EngineInput in = make_input(0.0, 4.0, 101.325);
-  run(&st, cs, &cfg, &in, 0.1, 0.02);
-  CHECK(st.ecu.idle_mode == ECU_IDLE_STANDBY);
-  CHECK_NEAR(st.ecu.idle_i_term, 0.0, 0.0);
-  CHECK_NEAR(st.ecu.throttle_cmd, 0.0, 0.0);
-}
-
-/* Above its authority the governor steps aside: the pilot's throttle is all
- * that counts, so the engine behaves exactly as with no governor. */
-static void test_idle_governor_steps_aside_for_the_pilot(void) {
-  EngineConfig on = idle_cfg(800.0);
-  EngineConfig off = idle_cfg(0.0);
-  EngineState a, b;
-  engine_model_init(&a, &on);
-  engine_model_init(&b, &off);
-  CylinderState ca[ENGINE_MAX_CYLINDERS], cb[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(ca);
-  init_cyl_states(cb);
-  EngineInput in = make_input(0.6, 8.0, 101.325);
-  run(&a, ca, &on, &in, 20.0, 0.02);
-  run(&b, cb, &off, &in, 20.0, 0.02);
-  CHECK_NEAR(a.omega_rad_s, b.omega_rad_s, 1e-6);
-  CHECK_NEAR(a.map_kpa, b.map_kpa, 1e-6);
-}
-
-/* The chop from cruise: closing the throttle from 0.8 must not stall the
- * engine, and it settles at the governed idle. */
-static void test_idle_governor_survives_a_throttle_chop(void) {
-  EngineConfig cfg = idle_cfg(800.0);
-  EngineState st;
-  engine_model_init(&st, &cfg);
-  CylinderState cs[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(cs);
-  EngineInput cruise = make_input(0.8, 6.0, 101.325);
-  EngineInput chop = make_input(0.0, 6.0, 101.325);
-  run(&st, cs, &cfg, &cruise, 20.0, 0.02);
-  CHECK(engine_model_rpm(&st) > 1500.0);
-  double lowest = 1e9;
-  for (int i = 0; i < 1500; i++) { /* 30 s at closed throttle */
-    run(&st, cs, &cfg, &chop, 0.02, 0.02);
-    lowest = fmin(lowest, engine_model_rpm(&st));
-    CHECK(st.run_state == ENGINE_RUNNING);
-  }
-  CHECK(lowest > 400.0);
-  CHECK_NEAR(engine_model_rpm(&st), 800.0, 25.0);
-}
-
-/* The governor belongs to a running engine: nothing with the ignition off or
- * while cranking. */
-static void test_idle_governor_only_acts_on_a_running_engine(void) {
-  EngineConfig cfg = idle_cfg(800.0);
-  EngineState st = idle_run(&cfg, 4.0, 20.0);
-  CHECK(st.ecu.idle_throttle > 0.0);
-
-  engine_model_stop(&st); /* ignition off, still spinning down */
-  CylinderState cs[ENGINE_MAX_CYLINDERS];
-  init_cyl_states(cs);
-  EngineInput in = make_input(0.0, 4.0, 101.325);
-  run(&st, cs, &cfg, &in, 0.1, 0.02);
-  CHECK_NEAR(st.ecu.idle_throttle, 0.0, 1e-12);
-  CHECK_NEAR(st.ecu.idle_i_term, 0.0, 1e-12);
-
-  st.run_state = ENGINE_STOPPED;
-  st.omega_rad_s = 0.0;
-  engine_model_start(&st, &cfg, cs);
-  CHECK(st.run_state == ENGINE_CRANKING);
-  CHECK_NEAR(st.ecu.idle_throttle, 0.0, 1e-12);
-  CHECK_NEAR(st.ecu.idle_i_term, 0.0, 1e-12);
-}
-
 /* Closed-throttle MAP follows ambient: a fixed vacuum drop went to zero at
  * altitude and starved the engine. */
 static void test_closed_throttle_map_scales_with_ambient(void) {
-  EngineConfig cfg = idle_cfg(0.0);
+  EngineConfig cfg = engine_config_default();
   double ratio_sl = 0.0, ratio_alt = 0.0;
   for (int k = 0; k < 2; k++) {
     double amb = k == 0 ? 101.325 : 70.1; /* ~3000 m */
@@ -1091,26 +875,6 @@ static const TestCase CASES[] = {
      test_friction_scales_with_displacement},
     {"engine_model.friction_grows_with_speed_and_vanishes_at_rest",
      test_friction_grows_with_speed_and_vanishes_at_rest},
-    {"engine_model.idle_governor_holds_the_target",
-     test_idle_governor_holds_the_target},
-    {"engine_model.idle_governor_off_or_pointless_adds_nothing",
-     test_idle_governor_off_or_pointless_adds_nothing},
-    {"engine_model.idle_governor_recovers_from_a_load_step",
-     test_idle_governor_recovers_from_a_load_step},
-    {"engine_model.idle_governor_authority_limit_and_no_windup",
-     test_idle_governor_authority_limit_and_no_windup},
-    {"engine_model.idle_governor_can_be_toggled_during_a_run",
-     test_idle_governor_can_be_toggled_during_a_run},
-    {"engine_model.engine_receives_the_ecu_throttle_command",
-     test_engine_receives_the_ecu_throttle_command},
-    {"engine_model.stopped_engine_reports_standby",
-     test_stopped_engine_reports_standby},
-    {"engine_model.idle_governor_steps_aside_for_the_pilot",
-     test_idle_governor_steps_aside_for_the_pilot},
-    {"engine_model.idle_governor_survives_a_throttle_chop",
-     test_idle_governor_survives_a_throttle_chop},
-    {"engine_model.idle_governor_only_acts_on_a_running_engine",
-     test_idle_governor_only_acts_on_a_running_engine},
     {"engine_model.closed_throttle_map_scales_with_ambient",
      test_closed_throttle_map_scales_with_ambient},
 };

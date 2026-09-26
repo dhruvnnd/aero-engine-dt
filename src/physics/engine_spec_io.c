@@ -106,6 +106,8 @@ EngineSpecResult engine_spec_load(const char *path, EngineConfig *out) {
       parse_ok = (parse_int_strict(value, &out->num_cylinders) == 0);
     } else if (strcmp(key, "firing_order") == 0) {
       parse_ok = (parse_firing_order(value, out) == 0);
+    } else if (strcmp(key, "ecu_fitted") == 0) {
+      parse_ok = (parse_int_strict(value, &out->ecu_fitted) == 0);
     } else if (engine_config_find_field(key) != NULL) {
       parse_ok = (parse_double_strict(
                       value, engine_config_field_ptr(
@@ -175,6 +177,12 @@ int engine_spec_save(const char *path, const EngineConfig *cfg) {
   /* every other parameter comes from the field table, grouped */
   for (int g = 0; g < ENGINE_CONFIG_GROUP_COUNT; g++) {
     fprintf(f, "# --- %s ---\n\n", ENGINE_CONFIG_GROUPS[g].name);
+    if (g == ENGINE_CONFIG_GROUP_ECU) {
+      fprintf(f, "# 1 if the engine has an ECU, 0 if the pilot's throttle drives\n"
+                 "# it directly. With 0 the fields below are ignored.\n"
+                 "ecu_fitted = %d\n\n",
+              cfg->ecu_fitted);
+    }
     for (int i = 0; i < ENGINE_CONFIG_FIELD_COUNT; i++) {
       const ConfigField *fld = &ENGINE_CONFIG_FIELDS[i];
       if (fld->group != g) {

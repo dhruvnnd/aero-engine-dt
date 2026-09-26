@@ -33,6 +33,7 @@ set(ENGINE_CORE_TESTS
   test_propeller
   test_ecu
   test_ecu_trends
+  test_ecu_integration
   test_run_log
 )
 

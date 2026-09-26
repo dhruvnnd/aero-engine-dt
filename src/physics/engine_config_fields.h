@@ -16,7 +16,7 @@ extern "C" {
  * struct member, its default in engine_config_default(), and one row here.
  *
  * Not in the table (they need custom handling): num_cylinders, firing_order,
- * and the cross-field rules (conrod vs stroke, evo before ivc).
+ * ecu_fitted, and the cross-field rules (conrod vs stroke, evo before ivc).
  * tests/test_engine_config_fields.c fails if a double is added to
  * EngineConfig without a row.
  */
@@ -37,8 +37,9 @@ typedef struct {
   int group;         /* index into ENGINE_CONFIG_GROUPS */
   size_t offset;     /* byte offset of the double inside EngineConfig */
 
-  double valid_min, valid_max; /* enforced by the validator; +-INFINITY = none */
-  int flags;                   /* CFG_MIN_EXCL | CFG_MAX_EXCL */
+  double valid_min,
+      valid_max; /* enforced by the validator; +-INFINITY = none */
+  int flags;     /* CFG_MIN_EXCL | CFG_MAX_EXCL */
 
   double typ_lo, typ_hi;       /* typical range (hint only); none if hi <= lo */
   double slider_lo, slider_hi; /* editor slider extent (typing may exceed it) */
@@ -50,6 +51,9 @@ typedef struct {
   const char *doc; /* comment written above the key in spec files; '\n'
                     * separates lines */
 } ConfigField;
+
+/* Index of the "ECU" group in ENGINE_CONFIG_GROUPS */
+#define ENGINE_CONFIG_GROUP_ECU 3
 
 extern const ConfigGroup ENGINE_CONFIG_GROUPS[];
 extern const int ENGINE_CONFIG_GROUP_COUNT;

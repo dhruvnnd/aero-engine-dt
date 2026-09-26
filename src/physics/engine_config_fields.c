@@ -8,13 +8,15 @@ const ConfigGroup ENGINE_CONFIG_GROUPS[] = {
     {"Dynamics", 0},
     {"Geometry", 0},
     {"Propeller", 0},
-    {"Idle governor", 0},
+    {"ECU", 0},
     {"Combustion", 1},
 };
 const int ENGINE_CONFIG_GROUP_COUNT =
     (int)(sizeof ENGINE_CONFIG_GROUPS / sizeof ENGINE_CONFIG_GROUPS[0]);
 
-enum { G_DYN = 0, G_GEOM = 1, G_PROP = 2, G_IDLE = 3, G_COMB = 4 };
+enum { G_DYN = 0, G_GEOM = 1, G_PROP = 2, G_ECU = 3, G_COMB = 4 };
+_Static_assert(G_ECU == ENGINE_CONFIG_GROUP_ECU,
+               "ENGINE_CONFIG_GROUP_ECU must match the ECU group's index");
 
 #define POS_EXCL (0.0), (INFINITY), CFG_MIN_EXCL /* strictly positive */
 #define NON_NEG (0.0), (INFINITY), 0             /* zero allowed */
@@ -117,25 +119,25 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      "zero-thrust advance ratio (airspeed unloads the blades).\n"
      "Typical range: 0.3 - 0.6; must be in [0, 1]."},
 
-    /* ---- idle governor ---- */
-    {"idle_target_rpm", "idle target speed", "rpm", G_IDLE,
-     OFF(idle_target_rpm), NON_NEG, 600.0, 1400.0, 0.0, 2000.0, "%.0f", 1.0,
+    /* ---- ECU ---- */
+    {"idle_target_rpm", "idle target speed", "rpm", G_ECU,
+     OFF(ecu.idle_target_rpm), NON_NEG, 600.0, 1400.0, 0.0, 2000.0, "%.0f", 1.0,
      "rpm",
      "Crank speed the idle governor holds by adding throttle while the\n"
      "engine runs. 0 disables the governor. Typical range for a direct-drive\n"
      "aircraft engine: 600 - 1400."},
-    {"idle_kp", "governor proportional gain", "throttle/rpm", G_IDLE,
-     OFF(idle_kp), NON_NEG, 0.0001, 0.001, 0.0, 0.003, "%.5f", 1.0,
+    {"idle_kp", "governor proportional gain", "throttle/rpm", G_ECU,
+     OFF(ecu.idle_kp), NON_NEG, 0.0001, 0.001, 0.0, 0.003, "%.5f", 1.0,
      "throttle/rpm",
      "Throttle added per rpm of speed error. Too high makes idle hunt.\n"
      "Typical range: 0.0001 - 0.001."},
-    {"idle_ki", "governor integral gain", "throttle/rpm/s", G_IDLE,
-     OFF(idle_ki), NON_NEG, 0.0001, 0.001, 0.0, 0.003, "%.5f", 1.0,
+    {"idle_ki", "governor integral gain", "throttle/rpm/s", G_ECU,
+     OFF(ecu.idle_ki), NON_NEG, 0.0001, 0.001, 0.0, 0.003, "%.5f", 1.0,
      "throttle/rpm/s",
      "Throttle added per rpm of error per second; removes the steady-state\n"
      "error left by the proportional term. Typical range: 0.0001 - 0.001."},
-    {"idle_max_throttle", "governor authority", "", G_IDLE,
-     OFF(idle_max_throttle), 0.0, 1.0, 0, 0.1, 0.25, 0.0, 0.5, "%.3f", 1.0, "",
+    {"idle_max_throttle", "governor authority", "", G_ECU,
+     OFF(ecu.idle_max_throttle), 0.0, 1.0, 0, 0.1, 0.25, 0.0, 0.5, "%.3f", 1.0, "",
      "Most throttle the governor may add, and the pilot throttle above which\n"
      "it steps aside. Typical range: 0.1 - 0.25; must be in [0, 1]."},
 

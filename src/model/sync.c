@@ -2,6 +2,7 @@
 
 #include "physics/combustion.h"
 #include "physics/cylinder.h"
+#include "physics/ecu.h"
 #include "physics/electrical.h"
 #include "physics/engine_model.h"
 #include "physics/environment.h"
@@ -47,6 +48,19 @@ void model_sync_step(ModelSync *sync, ModelState *state,
             state->env.density_kg_m3);
   EngineInput engine_input = *input;
   engine_input.load_torque_nm += state->prop.torque_nm;
+
+  const EcuPilotCmd pilot = {input->throttle};
+  EcuActuators actuators;
+  if (sync->engine_config.ecu_fitted) {
+    const EcuSensors sensors = {engine_model_rpm(&state->engine),
+                                state->engine.run_state == ENGINE_RUNNING,
+                                state->engine.ignition_on};
+    ecu_step(&state->ecu, &sync->engine_config.ecu, &sensors, &pilot,
+             &actuators, dt);
+  } else {
+    ecu_bypass(&state->ecu, &pilot, &actuators);
+  }
+  engine_input.throttle = actuators.throttle;
 
   engine_model_step(&state->engine, &sync->engine_config, &engine_input,
                     &sync->fuel_config, sync->cyl_config, state->cyl,

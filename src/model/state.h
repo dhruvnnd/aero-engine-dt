@@ -21,6 +21,7 @@ typedef struct {
   ElecState elec;       /* bus_v, alt_current_a, alt_field_a, batt_soc */
   EnvState env;         /* flight condition: OAT, ambient press, density alt */
   PropState prop;       /* propeller thrust / torque at the last step's rpm */
+  EcuState ecu;         /* the ECU's loop; ecu.fitted = 0 when there is none */
 
   CylinderState cyl[ENGINE_MAX_CYLINDERS];
 
