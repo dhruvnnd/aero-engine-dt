@@ -136,6 +136,10 @@ void instruments_panel_draw(bool *open, const ModelState *s) {
     instrument_row("manifold press.", s->engine.map_kpa, 1.0, "kPa", 1, NULL,
                    CHANNEL_OK);
     instrument_row("torque", s->torque_nm, 1.0, "N.m", 1, NULL, CHANNEL_OK);
+    instrument_row("prop load", s->prop.torque_nm, 1.0, "N.m", 1, NULL,
+                   CHANNEL_OK);
+    instrument_row("prop thrust", s->prop.thrust_n, 1.0, "N", 0, NULL,
+                   CHANNEL_OK);
 
     group_row("THERMAL");
     instrument_row("cyl head temp", s->thermal.cht_c, 1.0, "degC", 0,

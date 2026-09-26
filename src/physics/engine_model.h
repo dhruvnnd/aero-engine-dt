@@ -18,6 +18,7 @@ extern "C" {
 #include "physics/crank_thermo.h"
 #include "physics/cylinder.h"
 #include "physics/fuel.h"
+#include "physics/propeller.h"
 
 #define ENGINE_MAX_CYLINDERS 6
 
@@ -45,7 +46,9 @@ typedef struct {
 
 typedef struct {
   double throttle;             /* 0.0 (closed) .. 1.0 (wide open) */
-  double load_torque_nm;       /* external load (prop, generator, etc), N*m */
+  double load_torque_nm; /* external load on top of the propeller (accessories,
+                            a dyno), N*m; model_sync_step() adds the prop's own
+                            torque to this */
   double ambient_pressure_kpa; /* physics/environment.h's environment_isa() */
 } EngineInput;
 
@@ -64,6 +67,8 @@ typedef struct {
 
   double starter_torque_nm;
   double starter_catch_rpm;
+
+  PropConfig prop; /* direct-drive fixed-pitch propeller, see propeller.h */
 } EngineConfig;
 
 EngineConfig engine_config_default(void);
@@ -119,7 +124,14 @@ typedef struct {
   double bore_stroke_ratio;
   double rod_ratio;               /* conrod length / stroke */
   double piston_speed_3000rpm_ms; /* mean piston speed */
+
+  /* sea-level ISA, still air, at PROP_REF_RPM */
+  double prop_tip_speed_ms;
+  double prop_tip_mach;
+  double prop_static_torque_nm;
+  double prop_static_thrust_n;
 } EngineDerived;
+#define PROP_REF_RPM 2500.0
 EngineDerived engine_config_derived(const EngineConfig *cfg);
 
 /* A conventional firing order for 1..ENGINE_MAX_CYLINDERS cylinders (e.g.

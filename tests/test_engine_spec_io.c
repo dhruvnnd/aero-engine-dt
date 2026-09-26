@@ -96,6 +96,57 @@ static void test_geometry_fields_round_trip(void) {
   remove(TMP_PATH);
 }
 
+/* Phase 4: the propeller lives in the same spec file. */
+static void test_prop_fields_round_trip(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.prop.diameter_m = 1.55;
+  cfg.prop.j_zero_thrust = 0.95;
+  cfg.prop.ct_static = 0.115;
+  cfg.prop.cq_static = 0.0082;
+  cfg.prop.cq_unload = 0.35;
+
+  CHECK(engine_spec_save(TMP_PATH, &cfg) == 0);
+
+  EngineConfig loaded;
+  EngineSpecResult r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(r.status == ENGINE_SPEC_OK);
+  CHECK(r.unknown_keys == 0);
+  CHECK_NEAR(loaded.prop.diameter_m, 1.55, 1e-9);
+  CHECK_NEAR(loaded.prop.j_zero_thrust, 0.95, 1e-9);
+  CHECK_NEAR(loaded.prop.ct_static, 0.115, 1e-9);
+  CHECK_NEAR(loaded.prop.cq_static, 0.0082, 1e-9);
+  CHECK_NEAR(loaded.prop.cq_unload, 0.35, 1e-9);
+
+  remove(TMP_PATH);
+}
+
+/* A spec written before the propeller existed must still load, with the
+ * default propeller. */
+static void test_spec_without_prop_keys_gets_the_default_prop(void) {
+  write_raw("num_cylinders = 4\nfiring_order = 1,3,4,2\ninertia_kg_m2 = 0.7\n");
+
+  EngineConfig defaults = engine_config_default();
+  EngineConfig loaded;
+  EngineSpecResult r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(r.status == ENGINE_SPEC_OK);
+  CHECK_NEAR(loaded.prop.diameter_m, defaults.prop.diameter_m, 1e-12);
+  CHECK_NEAR(loaded.prop.cq_static, defaults.prop.cq_static, 1e-12);
+  CHECK_NEAR(loaded.inertia_kg_m2, 0.7, 1e-9);
+
+  remove(TMP_PATH);
+}
+
+static void test_validate_flags_bad_prop_values(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.prop.diameter_m = 0.0;
+  cfg.prop.cq_unload = 1.5;
+  CHECK(engine_config_validate(&cfg, NULL) >= 2);
+
+  cfg = engine_config_default();
+  cfg.prop.cq_static = 0.0; /* "no propeller" is allowed */
+  CHECK(engine_config_validate(&cfg, NULL) == 0);
+}
+
 static void test_missing_keys_fall_back_to_default(void) {
   write_raw("# only overriding one field\ninertia_kg_m2 = 0.95\n");
 
@@ -194,6 +245,11 @@ static const TestCase CASES[] = {
      test_save_then_load_round_trips},
     {"engine_spec_io.geometry_fields_round_trip",
      test_geometry_fields_round_trip},
+    {"engine_spec_io.prop_fields_round_trip", test_prop_fields_round_trip},
+    {"engine_spec_io.spec_without_prop_keys_gets_the_default_prop",
+     test_spec_without_prop_keys_gets_the_default_prop},
+    {"engine_spec_io.validate_flags_bad_prop_values",
+     test_validate_flags_bad_prop_values},
     {"engine_spec_io.missing_keys_fall_back_to_default",
      test_missing_keys_fall_back_to_default},
     {"engine_spec_io.open_failure_falls_back_to_default",

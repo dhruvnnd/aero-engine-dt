@@ -165,6 +165,9 @@ static void usage(FILE *out, const char *argv0) {
           "stderr. Add --sensor for the noisy sensor channels alongside\n"
           "ground truth. --db PATH sets the database file (default:\n"
           "runs/twin_sim.db; its parent directory is created if missing).\n\n"
+          "--load is an extra shaft load in N*m on top of the propeller\n"
+          "  (default 0); the propeller itself is set by the prop_* fields\n"
+          "  of the engine spec.\n\n"
           "--alt, --airspeed and --oat-offset pin that flight-condition\n"
           "  channel to a constant for the whole run, overriding the\n"
           "  profile's own schedule (throttle still follows the profile).\n"
@@ -270,12 +273,9 @@ int main(int argc, char **argv) {
   const char *profile_name = "idle";
   double dt = 0.02;
   double duration_s = -1.0; /* < 0 => use the profile's default */
-  /* Placeholder load until Phase 4's real propeller model exists (load
-   * should scale with RPM, not stay constant) -- 8.0 leaves a sustainable
-   * margin at idle MAP with Phase 1's real combustion torque; the old 40.0
-   * was calibrated against the pre-Phase-1 mean-value curve and stalls the
-   * default "idle" profile (closed throttle) immediately now. */
-  double load_nm = 8.0;
+  /* Extra shaft load on top of the propeller, N*m; the propeller's own load
+   * comes from the engine spec's prop_* fields (see model_sync_step()). */
+  double load_nm = 0.0;
   uint32_t seed = 1u;
   int with_sensor = 0;
   double fault_at_s = 0.0;

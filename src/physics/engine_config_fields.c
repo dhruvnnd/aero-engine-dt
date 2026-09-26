@@ -7,14 +7,16 @@
 const ConfigGroup ENGINE_CONFIG_GROUPS[] = {
     {"Dynamics", 0},
     {"Geometry", 0},
+    {"Propeller", 0},
     {"Combustion", 1},
 };
 const int ENGINE_CONFIG_GROUP_COUNT =
     (int)(sizeof ENGINE_CONFIG_GROUPS / sizeof ENGINE_CONFIG_GROUPS[0]);
 
-enum { G_DYN = 0, G_GEOM = 1, G_COMB = 2 };
+enum { G_DYN = 0, G_GEOM = 1, G_PROP = 2, G_COMB = 3 };
 
 #define POS_EXCL (0.0), (INFINITY), CFG_MIN_EXCL /* strictly positive */
+#define NON_NEG (0.0), (INFINITY), 0             /* zero allowed */
 #define ANY (-INFINITY), (INFINITY), 0           /* unbounded */
 #define NO_TYP 0.0, 0.0
 #define OFF(member) offsetof(EngineConfig, member)
@@ -25,7 +27,8 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
     /* ---- dynamics ---- */
     {"inertia_kg_m2", "crank inertia", "kg*m^2", G_DYN, OFF(inertia_kg_m2),
      POS_EXCL, 0.3, 1.0, 0.05, 3.0, "%.3f", 1.0, "kg*m^2",
-     "Effective rotating inertia of crank + flywheel + prop.\n"
+     "Effective rotating inertia of crank + flywheel + prop (the prop's\n"
+     "aerodynamic load is separate, see the propeller group).\n"
      "Typical range for a small 4-cyl aero piston engine: 0.3 - 1.0."},
     {"map_tau_s", "MAP time constant", "s", G_DYN, OFF(map_tau_s), POS_EXCL,
      0.1, 0.4, 0.02, 1.0, "%.3f", 1.0, "s",
@@ -75,6 +78,31 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      POS_EXCL, 0.3, 0.6, 0.1, 1.0, "%.3f", 1.0, "kg/cyl",
      "Reciprocating mass per cylinder (piston + pin + ~1/3 conrod\n"
      "mass) -- drives the inertia-torque term. Typical range: 0.3 - 0.6."},
+
+    /* ---- propeller ---- */
+    {"prop_diameter_m", "prop diameter", "m", G_PROP, OFF(prop.diameter_m),
+     POS_EXCL, 1.0, 1.8, 0.3, 3.0, "%.3f", 1000.0, "mm",
+     "Propeller diameter. Load torque scales with D^5, so this is the\n"
+     "biggest lever on RPM. Typical range for a small UAV: 1.0 - 1.8."},
+    {"prop_j_zero_thrust", "zero-thrust advance ratio", "", G_PROP,
+     OFF(prop.j_zero_thrust), POS_EXCL, 0.6, 1.1, 0.2, 2.0, "%.3f", 1.0, "",
+     "Advance ratio J = V/(n*D) at which thrust falls to zero, roughly\n"
+     "0.9 * pitch / diameter -- a coarser pitch unloads later.\n"
+     "Typical range: 0.6 - 1.1."},
+    {"prop_ct_static", "static thrust coefficient", "", G_PROP,
+     OFF(prop.ct_static), NON_NEG, 0.08, 0.13, 0.02, 0.25, "%.4f", 1.0, "",
+     "Thrust coefficient at J = 0 (thrust = Ct * rho * n^2 * D^4).\n"
+     "Typical range: 0.08 - 0.13."},
+    {"prop_cq_static", "static torque coefficient", "", G_PROP,
+     OFF(prop.cq_static), NON_NEG, 0.005, 0.010, 0.0, 0.03, "%.5f", 1.0, "",
+     "Torque coefficient at J = 0 (torque = Cq * rho * n^2 * D^5).\n"
+     "0 removes the propeller entirely (unloaded engine).\n"
+     "Typical range: 0.005 - 0.010."},
+    {"prop_cq_unload", "torque unloading", "", G_PROP, OFF(prop.cq_unload), 0.0,
+     1.0, 0, 0.3, 0.6, 0.0, 1.0, "%.3f", 1.0, "",
+     "Fraction of the static torque lost by the time J reaches the\n"
+     "zero-thrust advance ratio (airspeed unloads the blades).\n"
+     "Typical range: 0.3 - 0.6; must be in [0, 1]."},
 
     /* ---- combustion model tuning ---- */
     {"wiebe_a", "Wiebe a", "", G_COMB, OFF(geom.wiebe_a), POS_EXCL, 3.0, 6.0,

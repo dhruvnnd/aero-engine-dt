@@ -2,6 +2,8 @@
 
 #include "physics/combustion.h"
 #include "physics/engine_model.h"
+#include "physics/environment.h"
+#include "physics/propeller.h"
 #include "model/sync.h"
 #include "model/state.h"
 
@@ -119,6 +121,121 @@ static void test_cht_settles_near_load_scaled_target(void) {
   CHECK_NEAR(st.thermal.cht_c, target, 2.0);
 }
 
+/* ---- propeller coupling (Phase 4) ---- */
+
+/* Runs a fresh model at a fixed throttle / extra load / altitude / airspeed
+ * until it settles, and returns the final state. `cq_static` overrides the
+ * propeller's static torque coefficient (< 0 keeps the default; 0 removes the
+ * prop). */
+static ModelState settle(int ncyl, double throttle, double extra_load_nm,
+                         double alt_m, double airspeed_ms, double cq_static) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  sync.engine_config.num_cylinders = ncyl;
+  engine_default_firing_order(ncyl, sync.engine_config.firing_order);
+  if (cq_static >= 0.0) {
+    sync.engine_config.prop.cq_static = cq_static;
+  }
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  EngineInput in = make_input(throttle, extra_load_nm,
+                              environment_isa(alt_m).pressure_kpa);
+  EnvInput env = {alt_m, airspeed_ms, 0.0};
+  for (int i = 0; i < 1500; i++) { /* 30 s */
+    model_sync_step(&sync, &st, &in, &env, 0.02);
+  }
+  return st;
+}
+
+static void test_prop_load_reaches_the_crank(void) {
+  ModelState with_prop = settle(4, 0.6, 0.0, 0.0, 0.0, -1.0);
+  ModelState no_prop = settle(4, 0.6, 0.0, 0.0, 0.0, 0.0);
+  CHECK(with_prop.prop.torque_nm > 5.0);
+  CHECK(with_prop.prop.thrust_n > 50.0);
+  CHECK_NEAR(no_prop.prop.torque_nm, 0.0, 1e-12);
+  CHECK(with_prop.rpm < no_prop.rpm - 300.0); /* the prop drags RPM down */
+
+  /* the reported torque is the prop's torque at (about) the settled speed */
+  const EngineConfig defaults = engine_config_default();
+  PropState expect;
+  prop_step(&expect, &defaults.prop, with_prop.rpm, 0.0,
+            with_prop.env.density_kg_m3);
+  CHECK_NEAR(with_prop.prop.torque_nm, expect.torque_nm,
+             0.03 * expect.torque_nm);
+}
+
+/* The standing sanity check: throttle 0 -> 1 gives a monotonic, bounded
+ * equilibrium RPM (the flat placeholder load had no such restoring torque). */
+static void test_throttle_sweep_gives_monotonic_bounded_rpm(void) {
+  double prev = 0.0;
+  for (int k = 0; k <= 5; k++) {
+    ModelState s = settle(4, 0.2 * k, 0.0, 0.0, 0.0, -1.0);
+    CHECK(s.engine.run_state == ENGINE_RUNNING);
+    CHECK(s.rpm > prev + 100.0);
+    CHECK(s.rpm < 4000.0);
+    prev = s.rpm;
+  }
+}
+
+/* A propeller keeps every cylinder count bounded, and more cylinders (more
+ * torque) still settle at higher RPM. */
+static void test_every_cylinder_count_settles_bounded_at_wot(void) {
+  double prev = 0.0;
+  for (int n = 2; n <= 6; n++) {
+    ModelState s = settle(n, 1.0, 0.0, 0.0, 0.0, -1.0);
+    CHECK(s.engine.run_state == ENGINE_RUNNING);
+    CHECK(s.rpm < 5000.0);
+    CHECK(s.rpm > prev);
+    prev = s.rpm;
+  }
+}
+
+/* Airspeed raises the advance ratio: the prop unloads, so RPM rises at fixed
+ * throttle while thrust falls. */
+static void test_airspeed_raises_rpm_and_cuts_thrust(void) {
+  ModelState still = settle(4, 0.8, 0.0, 0.0, 0.0, -1.0);
+  ModelState fast = settle(4, 0.8, 0.0, 0.0, 40.0, -1.0);
+  CHECK(fast.rpm > still.rpm + 100.0);
+  CHECK(fast.prop.thrust_n < still.prop.thrust_n);
+  CHECK(fast.prop.advance_ratio > still.prop.advance_ratio);
+}
+
+/* Thin air loads the prop less (torque ~ density) and the engine makes less
+ * power, so both fall with altitude. */
+static void test_altitude_lowers_prop_load(void) {
+  ModelState sea = settle(4, 1.0, 0.0, 0.0, 0.0, -1.0);
+  ModelState high = settle(4, 1.0, 0.0, 3000.0, 0.0, -1.0);
+  CHECK(high.prop.torque_nm < sea.prop.torque_nm);
+  CHECK(high.prop.thrust_n < sea.prop.thrust_n);
+  CHECK(high.rpm < sea.rpm);
+}
+
+/* EngineInput.load_torque_nm is accessory load on top of the prop, not a
+ * replacement for it. */
+static void test_extra_load_adds_to_the_prop(void) {
+  ModelState base = settle(4, 0.8, 0.0, 0.0, 0.0, -1.0);
+  ModelState loaded = settle(4, 0.8, 15.0, 0.0, 0.0, -1.0);
+  CHECK(loaded.rpm < base.rpm - 200.0);
+  CHECK(loaded.prop.torque_nm < base.prop.torque_nm); /* slower prop, less load */
+}
+
+static void test_stopped_engine_has_no_prop_load(void) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  st.engine.run_state = ENGINE_STOPPED;
+  st.engine.omega_rad_s = 0.0;
+  EngineInput in = make_input(0.5, 0.0, 101.325);
+  EnvInput env = {0.0, 30.0, 0.0}; /* wind over a stationary prop */
+  for (int i = 0; i < 50; i++) {
+    model_sync_step(&sync, &st, &in, &env, 0.02);
+  }
+  CHECK_NEAR(st.prop.torque_nm, 0.0, 1e-12);
+  CHECK_NEAR(st.prop.thrust_n, 0.0, 1e-12);
+  CHECK_NEAR(st.rpm, 0.0, 1e-9);
+}
+
 static const TestCase CASES[] = {
     {"model_sync.init_bundles_cold_start", test_init_bundles_cold_start},
     {"model_sync.sim_clock_advances_by_dt", test_sim_clock_advances_by_dt},
@@ -127,6 +244,17 @@ static const TestCase CASES[] = {
     {"model_sync.throttle_up_spins_and_heats", test_throttle_up_spins_and_heats},
     {"model_sync.cht_settles_near_load_scaled_target",
      test_cht_settles_near_load_scaled_target},
+    {"model_sync.prop_load_reaches_the_crank", test_prop_load_reaches_the_crank},
+    {"model_sync.throttle_sweep_gives_monotonic_bounded_rpm",
+     test_throttle_sweep_gives_monotonic_bounded_rpm},
+    {"model_sync.every_cylinder_count_settles_bounded_at_wot",
+     test_every_cylinder_count_settles_bounded_at_wot},
+    {"model_sync.airspeed_raises_rpm_and_cuts_thrust",
+     test_airspeed_raises_rpm_and_cuts_thrust},
+    {"model_sync.altitude_lowers_prop_load", test_altitude_lowers_prop_load},
+    {"model_sync.extra_load_adds_to_the_prop", test_extra_load_adds_to_the_prop},
+    {"model_sync.stopped_engine_has_no_prop_load",
+     test_stopped_engine_has_no_prop_load},
 };
 
 RUN_TESTS(CASES)

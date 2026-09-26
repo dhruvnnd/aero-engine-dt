@@ -20,6 +20,7 @@ typedef struct {
   LubeState lube;       /* oil_press_kpa */
   ElecState elec;       /* bus_v, alt_current_a, alt_field_a, batt_soc */
   EnvState env;         /* flight condition: OAT, ambient press, density alt */
+  PropState prop;       /* propeller thrust / torque at the last step's rpm */
 
   CylinderState cyl[ENGINE_MAX_CYLINDERS];
 

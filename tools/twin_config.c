@@ -153,6 +153,13 @@ static int cmd_check(const char *path) {
   printf("\ntotal displacement            = %.3f L (%d cyl)\n", displacement_l,
          cfg.num_cylinders);
   printf("clearance volume (per cyl)    = %.2f cc\n", clearance_cc);
+
+  EngineDerived d = engine_config_derived(&cfg);
+  printf("prop tip speed @ %.0f rpm    = %.0f m/s (Mach %.2f)\n", PROP_REF_RPM,
+         d.prop_tip_speed_ms, d.prop_tip_mach);
+  printf("prop static torque / thrust   = %.1f N*m / %.0f N (sea level, %.0f "
+         "rpm)\n",
+         d.prop_static_torque_nm, d.prop_static_thrust_n, PROP_REF_RPM);
   return 0;
 }
 

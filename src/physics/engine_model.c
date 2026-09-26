@@ -179,6 +179,8 @@ EngineConfig engine_config_default(void) {
   cfg.starter_torque_nm = 25.0;
   cfg.starter_catch_rpm = 800.0;
 
+  cfg.prop = prop_config_default();
+
   return cfg;
 }
 
@@ -435,6 +437,16 @@ EngineDerived engine_config_derived(const EngineConfig *cfg) {
   d.bore_stroke_ratio = g->stroke_m > 0.0 ? g->bore_m / g->stroke_m : 0.0;
   d.rod_ratio = g->stroke_m > 0.0 ? g->conrod_len_m / g->stroke_m : 0.0;
   d.piston_speed_3000rpm_ms = 2.0 * g->stroke_m * 3000.0 / 60.0;
+
+  const double sea_level_density = 1.225; /* kg/m^3, ISA */
+  const double sea_level_sound_ms = 340.3;
+  PropState ps;
+  prop_step(&ps, &cfg->prop, PROP_REF_RPM, 0.0, sea_level_density);
+  d.prop_tip_speed_ms =
+      UNITS_PI * cfg->prop.diameter_m * (PROP_REF_RPM / 60.0);
+  d.prop_tip_mach = d.prop_tip_speed_ms / sea_level_sound_ms;
+  d.prop_static_torque_nm = ps.torque_nm;
+  d.prop_static_thrust_n = ps.thrust_n;
   return d;
 }
 

@@ -8,6 +8,8 @@ void model_state_init(ModelState *state, const EngineConfig *engine_config,
   lube_state_init(&state->lube);
   elec_state_init(&state->elec);
   environment_state(&state->env, 0.0, ambient_temp_c - 15.0, 0.0);
+  PropState no_prop = {0};
+  state->prop = no_prop;
 
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     if (i < engine_config->num_cylinders) {

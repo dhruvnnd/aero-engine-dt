@@ -122,6 +122,10 @@ void engine_spec_panel_draw(bool *open, const ModelSync *sync,
     row("bore / stroke", d.bore_stroke_ratio, "");
     row("rod ratio", d.rod_ratio, "");
     row("piston speed @ 3000 rpm", d.piston_speed_3000rpm_ms, "m/s");
+    row("prop tip speed @ 2500 rpm", d.prop_tip_speed_ms, "m/s");
+    row("prop tip Mach @ 2500 rpm", d.prop_tip_mach, "");
+    row("prop static torque @ 2500", d.prop_static_torque_nm, "N*m");
+    row("prop static thrust @ 2500", d.prop_static_thrust_n, "N");
     row("fuel model displacement", sync->fuel_config.displacement_l, "L");
     ImGui::EndTable();
   }

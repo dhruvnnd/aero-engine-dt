@@ -51,16 +51,10 @@
  * render frame rate. */
 #define SAMPLE_PERIOD_S 0.1
 
-/* External shaft load for the demo (prop + accessories), N*m -- a flat
- * placeholder until Phase 4's real propeller model exists (load should
- * scale with RPM/flight condition, not stay constant). 40.0 was calibrated
- * against the old mean-value torque curve; Phase 1's real geometry produces
- * only ~22 N*m at idle MAP (~30 kPa), so a fixed 40 N*m load stalled the
- * engine immediately at closed throttle every time. 8.0 leaves a comfortable
- * idle margin; it also means WOT revs higher than before, since the same
- * light load applies everywhere -- expected until Phase 4 fixes the whole
- * range at once. */
-#define DEMO_LOAD_NM 8.0
+/* Extra shaft load on top of the propeller (accessories, a dyno), N*m. The
+ * propeller's own load comes from the engine spec's prop_* fields and the
+ * flight condition, applied in model_sync_step(). */
+#define ACCESSORY_LOAD_NM 0.0
 
 typedef struct {
   SdlWindowContext window_ctx;
@@ -225,7 +219,7 @@ static void recording_start(AppState *app) {
   meta.profile = NULL;
   meta.dt = SAMPLE_PERIOD_S;
   meta.duration_s = 0.0; /* open-ended */
-  meta.load_nm = DEMO_LOAD_NM;
+  meta.load_nm = ACCESSORY_LOAD_NM;
   meta.seed = 0xC0FFEEu;
   meta.engine_spec = app->spec_path[0] ? app->spec_path : "default";
   meta.with_sensor = 1;
@@ -510,7 +504,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   EngineInput in;
   in.throttle = app->input.throttle;
-  in.load_torque_nm = DEMO_LOAD_NM;
+  in.load_torque_nm = ACCESSORY_LOAD_NM;
   in.ambient_pressure_kpa = atm.pressure_kpa;
 
   /* Sim time for this frame: scaled by speed, frozen while paused. Physics is

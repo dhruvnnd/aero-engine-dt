@@ -7,6 +7,7 @@
 #include "physics/environment.h"
 #include "physics/fuel.h"
 #include "physics/lubrication.h"
+#include "physics/propeller.h"
 #include "physics/thermal.h"
 
 void model_sync_init(ModelSync *sync) {
@@ -40,7 +41,14 @@ void model_sync_step(ModelSync *sync, ModelState *state,
                     env->airspeed_ms);
   double ambient_temp_c = state->env.oat_c;
 
-  engine_model_step(&state->engine, &sync->engine_config, input,
+  /* The propeller loads the crank */
+  prop_step(&state->prop, &sync->engine_config.prop,
+            engine_model_rpm(&state->engine), state->env.airspeed_ms,
+            state->env.density_kg_m3);
+  EngineInput engine_input = *input;
+  engine_input.load_torque_nm += state->prop.torque_nm;
+
+  engine_model_step(&state->engine, &sync->engine_config, &engine_input,
                     &sync->fuel_config, sync->cyl_config, state->cyl,
                     ambient_temp_c, sync->sim_time_s, dt);
 
