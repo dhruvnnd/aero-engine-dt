@@ -12,6 +12,7 @@ static void fill_state(ModelState *s, double rpm, double pilot) {
   ecu_init(&s->ecu);
   s->rpm = rpm;
   EcuState *e = &s->ecu;
+  e->rpm_seen = rpm - 25.0; /* a slightly wrong sensor */
   e->idle_target_rpm = 800.0;
   e->pilot_throttle = pilot;
   e->idle_throttle = 0.08;
@@ -34,6 +35,7 @@ static void test_sample_maps_each_channel_and_scales_to_percent(void) {
   ecu_trends_sample(&T, &s);
 
   CHECK_NEAR(history_last(&T.hist[ECUM_RPM]), 765.0, 1e-9);
+  CHECK_NEAR(history_last(&T.hist[ECUM_RPM_SEEN]), 740.0, 1e-9); /* ECU's view */
   CHECK_NEAR(history_last(&T.hist[ECUM_TARGET]), 800.0, 1e-9);
   CHECK_NEAR(history_last(&T.hist[ECUM_PILOT]), 2.0, 1e-9);
   CHECK_NEAR(history_last(&T.hist[ECUM_GOVERNOR]), 8.0, 1e-9);

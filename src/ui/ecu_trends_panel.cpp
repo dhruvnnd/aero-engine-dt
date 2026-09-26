@@ -100,7 +100,11 @@ void ecu_trends_panel_draw(bool *open, const EcuTrends *t,
         hline("##target", history_at(target, n - 1),
               ImVec4(1.0f, 0.75f, 0.20f, 0.85f));
       }
-      line("rpm", &src->hist[ECUM_RPM], dt, ImVec4(0.55f, 0.85f, 0.90f, 1.0f));
+      line("true rpm", &src->hist[ECUM_RPM], dt,
+           ImVec4(0.55f, 0.85f, 0.90f, 1.0f), 2.4f);
+      /* on top of the true line: they only part under a sensor fault */
+      line("ECU reads", &src->hist[ECUM_RPM_SEEN], dt,
+           ImVec4(0.85f, 0.45f, 0.75f, 1.0f), 1.2f);
       ImPlot::EndPlot();
     }
     if (begin_time_plot("Throttle", "% throttle", max_span, dt, false)) {

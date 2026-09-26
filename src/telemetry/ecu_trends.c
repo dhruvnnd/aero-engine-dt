@@ -9,6 +9,7 @@ void ecu_trends_init(EcuTrends *t) {
 void ecu_trends_sample(EcuTrends *t, const ModelState *s) {
   const EcuState *e = &s->ecu;
   history_push(&t->hist[ECUM_RPM], s->rpm);
+  history_push(&t->hist[ECUM_RPM_SEEN], e->rpm_seen);
   history_push(&t->hist[ECUM_TARGET], e->idle_target_rpm);
   history_push(&t->hist[ECUM_PILOT], e->pilot_throttle * 100.0);
   history_push(&t->hist[ECUM_GOVERNOR], e->idle_throttle * 100.0);

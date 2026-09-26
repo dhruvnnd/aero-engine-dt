@@ -121,7 +121,10 @@ EcuActions ecu_panel_draw(bool *open, const ModelState *s,
                             ImGui::GetFontSize() * 5.0f);
     ImGui::TableSetupColumn("unit", ImGuiTableColumnFlags_WidthStretch);
     row("target", "rpm", "%.0f", e.idle_target_rpm);
-    row("measured", "rpm", "%.0f", s->rpm);
+    row("ECU reads", "rpm", "%.0f", e.rpm_seen);
+    if (fabs(e.rpm_seen - s->rpm) > 0.5) { /* a sensor fault: the ECU is misled */
+      row("true speed", "rpm", "%.0f", s->rpm);
+    }
     row("error", "rpm", "%+.0f", e.idle_error_rpm);
     row("P term", "% throttle", "%+.1f", e.idle_p_term * 100.0);
     row("I term", "% throttle", "%.1f", e.idle_i_term * 100.0);

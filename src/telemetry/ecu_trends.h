@@ -12,7 +12,8 @@ extern "C" {
 #define ECU_TRENDS_CAP TRENDS_CAP
 
 typedef enum {
-  ECUM_RPM = 0,  /* measured crank speed, rpm */
+  ECUM_RPM = 0,  /* true crank speed, rpm */
+  ECUM_RPM_SEEN, /* crank speed as the ECU reads it (differs under a fault) */
   ECUM_TARGET,   /* idle target, rpm (0 when none) */
   ECUM_PILOT,    /* pilot throttle, percent */
   ECUM_GOVERNOR, /* governor output (what it adds), percent */
