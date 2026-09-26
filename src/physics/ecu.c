@@ -26,6 +26,7 @@ void ecu_init(EcuState *e) {
   e->time_s = 0.0;
   ecu_reset_idle(e);
   e->rpm1_seen = e->rpm2_seen = e->rpm_seen = 0.0;
+  e->cht_seen = e->egt_seen = e->oil_seen = 0.0;
   e->speed_source = ECU_SRC_PRIMARY;
   ecu_diag_init(&e->diag);
   e->idle_target_rpm = 0.0;
@@ -66,6 +67,9 @@ void ecu_step(EcuState *e, const EcuConfig *cfg, const EcuSensors *sensors,
   e->pilot_throttle = pilot_throttle;
   e->rpm1_seen = sensors->rpm;
   e->rpm2_seen = sensors->rpm2;
+  e->cht_seen = sensors->cht_c;
+  e->egt_seen = sensors->egt_c;
+  e->oil_seen = sensors->oil_temp_c;
   e->idle_target_rpm = cfg->idle_target_rpm > 0.0 ? cfg->idle_target_rpm : 0.0;
 
   /* which speed reading to act on */
@@ -75,6 +79,9 @@ void ecu_step(EcuState *e, const EcuConfig *cfg, const EcuSensors *sensors,
     in.dt = dt;
     in.rpm[0] = sensors->rpm;
     in.rpm[1] = sensors->rpm2;
+    in.cht_c = sensors->cht_c;
+    in.egt_c = sensors->egt_c;
+    in.oil_c = sensors->oil_temp_c;
     in.running = running;
     in.pilot_throttle = pilot_throttle;
     in.throttle_cmd = e->throttle_cmd; /* the previous step's */
@@ -135,6 +142,7 @@ void ecu_bypass(EcuState *e, const EcuPilotCmd *pilot, EcuActuators *out) {
   e->fitted = 0;
   e->idle_mode = ECU_IDLE_DISABLED;
   e->rpm1_seen = e->rpm2_seen = e->rpm_seen = 0.0;
+  e->cht_seen = e->egt_seen = e->oil_seen = 0.0;
   e->speed_source = ECU_SRC_NONE;
   e->idle_target_rpm = 0.0;
   ecu_reset_idle(e);

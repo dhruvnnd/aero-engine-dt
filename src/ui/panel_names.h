@@ -20,6 +20,7 @@
 #define PANEL_ECU_IO "ECU I/O"
 #define PANEL_ECU_COMPARE "ECU Compare"
 #define PANEL_ECU_FAULTS "ECU Faults"
+#define PANEL_ENGINE_FAULTS "Engine Faults"
 #define PANEL_EVENT_LOG "Event Log"
 #define PANEL_GAMEPAD "Gamepad / Input Map"
 

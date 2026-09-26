@@ -15,6 +15,7 @@ typedef struct {
   double t;
   double pilot;
   int running;
+  double cht, egt, oil; /* temperature readings, healthy unless a test heats them */
 } Rig;
 
 static void rig_init(Rig *r) {
@@ -23,11 +24,14 @@ static void rig_init(Rig *r) {
   r->t = 0.0;
   r->pilot = 0.0;
   r->running = 1;
+  r->cht = 150.0;
+  r->egt = 600.0;
+  r->oil = 80.0;
 }
 
 /* One control step with the given readings. */
 static void rig_step(Rig *r, double r1, double r2) {
-  const EcuSensors s = {r1, r2, r->running, r->running};
+  const EcuSensors s = {r1, r2, r->running, r->running, r->cht, r->egt, r->oil};
   const EcuPilotCmd p = {r->pilot};
   EcuActuators out;
   ecu_step(&r->e, &r->c, &s, &p, &out, DT);
@@ -307,6 +311,138 @@ static void test_diagnostics_off_trusts_the_primary_blindly(void) {
   CHECK(r.e.diag_enabled == 1);
 }
 
+/* ---- temperature limit codes ---- */
+
+/* Runs `seconds` of healthy speed with the rig's current temperatures. */
+static void hold_temps(Rig *r, double seconds) { run_healthy(r, 800.0, seconds); }
+
+static void test_normal_temperatures_raise_nothing(void) {
+  Rig r;
+  rig_init(&r);
+  hold_temps(&r, 60.0);
+  CHECK(ecu_diag_active_count(&r.e.diag) == 0);
+  CHECK_NEAR(r.e.cht_seen, 150.0, 0.0);
+  CHECK_NEAR(r.e.egt_seen, 600.0, 0.0);
+  CHECK_NEAR(r.e.oil_seen, 80.0, 0.0);
+}
+
+/* Over the limit for the hold time sets the code; a brief spike does not. */
+static void test_a_temperature_code_needs_the_hold_time(void) {
+  Rig r;
+  rig_init(&r);
+  hold_temps(&r, 5.0);
+
+  r.cht = 215.0; /* over the high limit (210), under critical (240) */
+  hold_temps(&r, r.c.diag.temp_hold_s - 0.5);
+  CHECK(!active(&r, ECU_DTC_CHT_HIGH));
+  hold_temps(&r, 1.0);
+  CHECK(active(&r, ECU_DTC_CHT_HIGH));
+  CHECK(!active(&r, ECU_DTC_CHT_CRIT));
+
+  /* a spike that comes and goes never adds up */
+  Rig q;
+  rig_init(&q);
+  for (int i = 0; i < 5; i++) {
+    q.cht = 230.0;
+    hold_temps(&q, 2.0);
+    q.cht = 150.0;
+    hold_temps(&q, 1.0);
+  }
+  CHECK(!active(&q, ECU_DTC_CHT_HIGH));
+  CHECK(ecu_diag_latched_count(&q.e.diag) == 0);
+}
+
+static void test_high_and_critical_are_separate_limits_with_their_severity(void) {
+  Rig r;
+  rig_init(&r);
+  r.cht = 250.0; /* past both */
+  hold_temps(&r, 4.0);
+  CHECK(active(&r, ECU_DTC_CHT_HIGH));
+  CHECK(active(&r, ECU_DTC_CHT_CRIT));
+  CHECK(ecu_dtc_info(ECU_DTC_CHT_HIGH)->severity == 0);
+  CHECK(ecu_dtc_info(ECU_DTC_CHT_CRIT)->severity == 1);
+
+  Rig e;
+  rig_init(&e);
+  e.egt = 900.0;
+  e.oil = 130.0;
+  hold_temps(&e, 4.0);
+  CHECK(active(&e, ECU_DTC_EGT_HIGH) && active(&e, ECU_DTC_EGT_CRIT));
+  CHECK(active(&e, ECU_DTC_OIL_HIGH) && active(&e, ECU_DTC_OIL_CRIT));
+  CHECK(!active(&e, ECU_DTC_CHT_HIGH));
+}
+
+/* Hysteresis: just under the limit is not clear; clear needs 5 degC under it
+ * for the heal time. The code stays latched. */
+static void test_a_temperature_code_clears_with_hysteresis(void) {
+  Rig r;
+  rig_init(&r);
+  r.oil = 118.0; /* over 110 */
+  hold_temps(&r, 4.0);
+  CHECK(active(&r, ECU_DTC_OIL_HIGH));
+
+  r.oil = 107.0; /* under the limit, but within the 5 degC band */
+  hold_temps(&r, r.c.diag.heal_s + 3.0);
+  CHECK(active(&r, ECU_DTC_OIL_HIGH));
+
+  r.oil = 100.0; /* properly clear */
+  hold_temps(&r, r.c.diag.heal_s - 1.0);
+  CHECK(active(&r, ECU_DTC_OIL_HIGH)); /* not for long enough yet */
+  hold_temps(&r, 2.0);
+  CHECK(!active(&r, ECU_DTC_OIL_HIGH));
+  CHECK(r.e.diag.dtc[ECU_DTC_OIL_HIGH].latched == 1);
+  CHECK(r.e.diag.dtc[ECU_DTC_OIL_HIGH].count == 1);
+}
+
+/* Temperature codes are about the engine, not the speed sensors: they never
+ * change which speed the ECU uses or push it into limp-home. */
+static void test_temperature_codes_leave_the_speed_source_alone(void) {
+  Rig r;
+  rig_init(&r);
+  r.cht = 260.0;
+  r.egt = 900.0;
+  r.oil = 130.0;
+  hold_temps(&r, 10.0);
+  CHECK(ecu_diag_active_count(&r.e.diag) == 6);
+  CHECK(r.e.speed_source == ECU_SRC_PRIMARY);
+  CHECK(r.e.idle_mode != ECU_IDLE_LIMP);
+}
+
+static void test_temperatures_are_only_checked_while_running(void) {
+  Rig r;
+  rig_init(&r);
+  r.running = 0;
+  r.cht = 300.0; /* a hot-soaked engine at rest */
+  for (int i = 0; i < 1000; i++) {
+    rig_step(&r, 0.0, 0.0);
+  }
+  CHECK(ecu_diag_active_count(&r.e.diag) == 0);
+
+  r.running = 1;
+  hold_temps(&r, 4.0);
+  CHECK(active(&r, ECU_DTC_CHT_HIGH));
+  r.running = 0; /* shut down: the fault is held, not cleared */
+  r.cht = 100.0;
+  for (int i = 0; i < 1000; i++) {
+    rig_step(&r, 0.0, 0.0);
+  }
+  CHECK(active(&r, ECU_DTC_CHT_HIGH));
+}
+
+static void test_the_freeze_frame_of_a_temperature_code_has_the_temperatures(void) {
+  Rig r;
+  rig_init(&r);
+  r.egt = 870.0;
+  r.oil = 90.0;
+  hold_temps(&r, 4.0);
+  const EcuDtc *d = &r.e.diag.dtc[ECU_DTC_EGT_CRIT];
+  CHECK(d->active);
+  CHECK_NEAR(d->freeze.egt_c, 870.0, 0.0);
+  CHECK_NEAR(d->freeze.cht_c, 150.0, 0.0);
+  CHECK_NEAR(d->freeze.oil_c, 90.0, 0.0);
+  CHECK_NEAR(d->first_s, r.c.diag.temp_hold_s, 0.1); /* when the hold ran out */
+}
+
 static void test_dtc_table_is_complete_and_sensible(void) {
   for (int i = 0; i < (int)ECU_DTC_COUNT; i++) {
     const EcuDtcInfo *a = ecu_dtc_info((EcuDtcId)i);
@@ -350,6 +486,20 @@ static const TestCase CASES[] = {
      test_nothing_is_checked_while_the_engine_is_not_running},
     {"ecu_diag.diagnostics_off_trusts_the_primary_blindly",
      test_diagnostics_off_trusts_the_primary_blindly},
+    {"ecu_diag.normal_temperatures_raise_nothing",
+     test_normal_temperatures_raise_nothing},
+    {"ecu_diag.a_temperature_code_needs_the_hold_time",
+     test_a_temperature_code_needs_the_hold_time},
+    {"ecu_diag.high_and_critical_are_separate_limits_with_their_severity",
+     test_high_and_critical_are_separate_limits_with_their_severity},
+    {"ecu_diag.a_temperature_code_clears_with_hysteresis",
+     test_a_temperature_code_clears_with_hysteresis},
+    {"ecu_diag.temperature_codes_leave_the_speed_source_alone",
+     test_temperature_codes_leave_the_speed_source_alone},
+    {"ecu_diag.temperatures_are_only_checked_while_running",
+     test_temperatures_are_only_checked_while_running},
+    {"ecu_diag.the_freeze_frame_of_a_temperature_code_has_the_temperatures",
+     test_the_freeze_frame_of_a_temperature_code_has_the_temperatures},
     {"ecu_diag.dtc_table_is_complete_and_sensible",
      test_dtc_table_is_complete_and_sensible},
 };

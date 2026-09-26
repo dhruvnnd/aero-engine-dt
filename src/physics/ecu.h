@@ -46,6 +46,9 @@ typedef struct {
   double rpm2; /* redundant one (alternator-derived) */
   int engine_running; /* running (not stopped or cranking) */
   int ignition_on;
+  double cht_c;      /* hottest cylinder head */
+  double egt_c;      /* hottest exhaust port */
+  double oil_temp_c;
 } EcuSensors;
 
 /* A fault on one of the ECU's sensor inputs: what the ECU reads instead of the
@@ -95,6 +98,7 @@ typedef struct {
   double time_s;     /* ECU clock: time it has been stepped */
 
   /* speed inputs */
+  double cht_seen, egt_seen, oil_seen; /* the temperatures it reads */
   double rpm1_seen, rpm2_seen; /* what each sensor read, faults included */
   EcuSpeedSource speed_source; /* which the governor is using */
   double rpm_seen;             /* the speed it uses (0 with no source) */

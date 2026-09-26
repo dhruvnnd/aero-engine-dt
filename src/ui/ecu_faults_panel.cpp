@@ -89,10 +89,16 @@ EcuFaultsActions ecu_faults_panel_draw(bool *open, const ModelState *s) {
       ImGui::TableSetColumnIndex(4);
       ImGui::Text("%.1f s", d.first_s);
       ImGui::TableSetColumnIndex(5);
-      ImGui::TextDisabled("crank %.0f  alt %.0f  pilot %.0f %%  using %s",
-                          d.freeze.rpm1, d.freeze.rpm2,
-                          d.freeze.pilot_throttle * 100.0,
-                          ecu_speed_source_name(d.freeze.source));
+      if (i >= (int)ECU_DTC_CHT_HIGH) { /* a temperature code */
+        ImGui::TextDisabled("head %.0f  exhaust %.0f  oil %.0f degC  crank %.0f rpm",
+                            d.freeze.cht_c, d.freeze.egt_c, d.freeze.oil_c,
+                            d.freeze.rpm1);
+      } else {
+        ImGui::TextDisabled("crank %.0f  alt %.0f  pilot %.0f %%  using %s",
+                            d.freeze.rpm1, d.freeze.rpm2,
+                            d.freeze.pilot_throttle * 100.0,
+                            ecu_speed_source_name(d.freeze.source));
+      }
     }
     ImGui::EndTable();
   }

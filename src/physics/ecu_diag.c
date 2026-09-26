@@ -19,7 +19,16 @@ static const EcuDtcInfo DTC_INFO[ECU_DTC_COUNT] = {
     {"E112", "Alternator speed: signal frozen", 0},
     {"E113", "Alternator speed: signal lost", 0},
     {"E120", "Speed sensors disagree, source unknown", 1},
+    {"E201", "Cylinder head temperature high", 0},
+    {"E202", "Cylinder head temperature critical", 1},
+    {"E211", "Exhaust gas temperature high", 0},
+    {"E212", "Exhaust gas temperature critical", 1},
+    {"E221", "Oil temperature high", 0},
+    {"E222", "Oil temperature critical", 1},
 };
+
+/* A temperature code clears once the value is this far under its limit. */
+#define TEMP_HYSTERESIS_C 5.0
 
 const EcuDtcInfo *ecu_dtc_info(EcuDtcId id) {
   return (int)id >= 0 && (int)id < (int)ECU_DTC_COUNT ? &DTC_INFO[id] : NULL;
@@ -32,6 +41,14 @@ EcuDiagConfig ecu_diag_config_default(void) {
   c.mismatch_s = 1.0;
   c.frozen_s = 2.0;
   c.heal_s = 5.0;
+  /* The same figures as the ground monitors' demo limits (monitor.c). */
+  c.cht_high_c = 210.0;
+  c.cht_crit_c = 240.0;
+  c.egt_high_c = 780.0;
+  c.egt_crit_c = 850.0;
+  c.oil_high_c = 110.0;
+  c.oil_crit_c = 125.0;
+  c.temp_hold_s = 3.0;
   return c;
 }
 
@@ -95,8 +112,42 @@ static void record(EcuDiag *d, EcuDtcId id, int present, const EcuDiagInput *in,
     t->freeze.pilot_throttle = in->pilot_throttle;
     t->freeze.throttle_cmd = in->throttle_cmd;
     t->freeze.source = source;
+    t->freeze.cht_c = in->cht_c;
+    t->freeze.egt_c = in->egt_c;
+    t->freeze.oil_c = in->oil_c;
   }
   t->active = present;
+}
+
+/* Each temperature limit: over it for temp_hold_s sets the code, and it clears
+ * once the value has been TEMP_HYSTERESIS_C under the limit for heal_s. */
+static void check_temperatures(EcuDiag *d, const EcuDiagConfig *cfg,
+                               const EcuDiagInput *in) {
+  const double value[ECU_TEMP_CHECKS] = {in->cht_c, in->cht_c, in->egt_c,
+                                         in->egt_c, in->oil_c, in->oil_c};
+  const double limit[ECU_TEMP_CHECKS] = {cfg->cht_high_c, cfg->cht_crit_c,
+                                         cfg->egt_high_c, cfg->egt_crit_c,
+                                         cfg->oil_high_c, cfg->oil_crit_c};
+  for (int k = 0; k < ECU_TEMP_CHECKS; k++) {
+    if (value[k] >= limit[k]) {
+      d->temp_hold_t[k] += in->dt;
+      d->temp_clear_t[k] = 0.0;
+      if (d->temp_hold_t[k] >= cfg->temp_hold_s) {
+        d->temp_active[k] = 1;
+      }
+    } else {
+      d->temp_hold_t[k] = 0.0;
+      if (d->temp_active[k]) {
+        d->temp_clear_t[k] = value[k] < limit[k] - TEMP_HYSTERESIS_C
+                                 ? d->temp_clear_t[k] + in->dt
+                                 : 0.0;
+        if (d->temp_clear_t[k] >= cfg->heal_s) {
+          d->temp_active[k] = 0;
+          d->temp_clear_t[k] = 0.0;
+        }
+      }
+    }
+  }
 }
 
 void ecu_diag_step(EcuDiag *d, const EcuDiagConfig *cfg, const EcuDiagInput *in,
@@ -108,6 +159,7 @@ void ecu_diag_step(EcuDiag *d, const EcuDiagConfig *cfg, const EcuDiagInput *in,
     d->mismatch_t = 0.0;
     d->agree_t = 0.0;
   } else {
+    check_temperatures(d, cfg, in);
     for (int c = 0; c < 2; c++) {
       check_channel(&d->ch[c], cfg, in->rpm[c], in->dt);
     }
@@ -170,6 +222,10 @@ void ecu_diag_step(EcuDiag *d, const EcuDiagConfig *cfg, const EcuDiagInput *in,
   record(d, ECU_DTC_RPM2_FROZEN, d->ch[1].frozen, in, out->source);
   record(d, ECU_DTC_RPM2_LOST, d->ch[1].lost, in, out->source);
   record(d, ECU_DTC_MISMATCH, d->mismatch, in, out->source);
+  for (int k = 0; k < ECU_TEMP_CHECKS; k++) {
+    record(d, (EcuDtcId)((int)ECU_DTC_CHT_HIGH + k), d->temp_active[k], in,
+           out->source);
+  }
 }
 
 void ecu_diag_clear_codes(EcuDiag *d) {

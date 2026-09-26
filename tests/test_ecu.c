@@ -24,7 +24,7 @@ static void init(EcuState *e) {
 /* One step; returns the throttle the ECU would drive. */
 static double step(EcuState *e, const EcuConfig *c, double rpm, double pilot,
                    double dt, int running, int ignition) {
-  const EcuSensors s = {rpm, rpm, running, ignition};
+  const EcuSensors s = {rpm, rpm, running, ignition, 100.0, 500.0, 70.0};
   const EcuPilotCmd p = {pilot};
   EcuActuators out;
   ecu_step(e, c, &s, &p, &out, dt);

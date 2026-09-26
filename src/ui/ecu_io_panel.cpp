@@ -155,6 +155,24 @@ EcuIoActions ecu_io_panel_draw(bool *open, const ModelState *s,
         e.speed_source == ECU_SRC_NONE ? COL_WARNING
         : degraded                     ? COL_CAUTION
                                        : COL_OK);
+    /* temperatures, coloured by the ECU's own limit codes */
+    struct Temp {
+      const char *name;
+      double value;
+      EcuDtcId high, crit;
+    };
+    const Temp temps[3] = {
+        {"hottest head", e.cht_seen, ECU_DTC_CHT_HIGH, ECU_DTC_CHT_CRIT},
+        {"hottest exhaust", e.egt_seen, ECU_DTC_EGT_HIGH, ECU_DTC_EGT_CRIT},
+        {"oil temperature", e.oil_seen, ECU_DTC_OIL_HIGH, ECU_DTC_OIL_CRIT}};
+    for (const Temp &t : temps) {
+      snprintf(buf, sizeof buf, "%.0f degC", t.value);
+      const bool crit = e.diag.dtc[t.crit].active;
+      const bool high = e.diag.dtc[t.high].active;
+      row(t.name, buf,
+          crit ? "over the critical limit" : (high ? "over the high limit" : ""),
+          crit ? COL_WARNING : (high ? COL_CAUTION : COL_OK));
+    }
     row("engine running", s->engine.run_state == ENGINE_RUNNING ? "yes" : "no",
         "");
     row("ignition", s->engine.ignition_on ? "on" : "off", "");

@@ -24,6 +24,7 @@
 #include "telemetry/annunciator.h"
 #include "telemetry/cyl_trends.h"
 #include "telemetry/ecu_compare.h"
+#include "telemetry/engine_faults.h"
 #include "telemetry/ecu_trends.h"
 #include "telemetry/event_log.h"
 #include "telemetry/monitor.h"
@@ -37,6 +38,7 @@
 #include "ui/ecu_io_panel.h"
 #include "ui/ecu_panel.h"
 #include "ui/ecu_trends_panel.h"
+#include "ui/engine_faults_panel.h"
 #include "ui/engine_spec_panel.h"
 #include "ui/event_log_panel.h"
 #include "ui/faults_panel.h"
@@ -94,6 +96,7 @@ typedef struct {
   ModelSync shadow_sync;   /* the same engine with its ECU bypassed, for the ECU */
   ModelState shadow_state; /* Compare panel; stepped alongside the real one */
   EcuCompareTrends ecu_compare_trends;
+  EngineFaultTracker engine_faults; /* injected cylinder faults vs the monitors */
   EcuTrends ecu_trends;      /* idle-governor loop history for the ECU panel */
   EcuIdleMode logged_ecu_mode; /* governor mode last checked for event-log lines */
   int logged_dtc_active[ECU_DTC_COUNT]; /* fault codes last written to the log */
@@ -323,6 +326,7 @@ static void reset_simulation_state(AppState *app) {
   cyl_trends_init(&app->cyl_trends);
   ecu_trends_init(&app->ecu_trends);
   ecu_compare_init(&app->ecu_compare_trends);
+  engine_faults_init(&app->engine_faults);
   app->logged_ecu_mode = app->state.ecu.idle_mode;
   for (int i = 0; i < (int)ECU_DTC_COUNT; i++) {
     app->logged_dtc_active[i] = 0;
@@ -710,6 +714,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                       app->sync.engine_config.num_cylinders);
     ecu_trends_sample(&app->ecu_trends, &app->state); /* the ECU's own numbers
                                                        * are exact, not sensed */
+    engine_faults_update(&app->engine_faults, app->sync.cyl_config, &app->state,
+                         app->sync.engine_config.num_cylinders,
+                         app->sync.sim_time_s);
     if (app->sync.engine_config.ecu_fitted) {
       ecu_compare_sample(&app->ecu_compare_trends, &app->state,
                          &app->shadow_state);
@@ -814,6 +821,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("ECU I/O", NULL, &app->panels.ecu_io);
       ImGui::MenuItem("ECU Faults", NULL, &app->panels.ecu_faults);
       ImGui::MenuItem("ECU Compare", NULL, &app->panels.ecu_compare);
+      ImGui::MenuItem("Engine Faults", NULL, &app->panels.engine_faults);
       ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
       ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
       ImGui::Separator();
@@ -894,6 +902,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (ea.toggle_idle_governor) {
       idle_governor_toggle(app);
     }
+  }
+  if (app->panels.engine_faults) {
+    engine_faults_panel_draw(&app->panels.engine_faults, app->sync.cyl_config,
+                             app->sync.engine_config.num_cylinders, &app->state,
+                             &app->engine_trace, &app->engine_faults,
+                             app->sync.sim_time_s);
   }
   if (app->panels.ecu_io) {
     const EcuSensorFault faults[2] = {app->sync.ecu_rpm_fault,

@@ -5,8 +5,8 @@
 extern "C" {
 #endif
 
-/* The ECU's self-diagnosis of its two engine-speed inputs and the fault codes
- * it records */
+/* The ECU's self-diagnosis of its two engine-speed inputs, its temperature
+ * limits, and the fault codes it records */
 
 typedef struct {
   double jump_rpm;     /* smallest reading step that counts as a jump */
@@ -14,6 +14,11 @@ typedef struct {
   double mismatch_s;   /* ... for this long before a mismatch is declared */
   double frozen_s;     /* unchanged this long = frozen */
   double heal_s;       /* clean this long before a fault clears */
+
+  double cht_high_c, cht_crit_c; /* head temperature limits */
+  double egt_high_c, egt_crit_c; /* exhaust gas temperature limits */
+  double oil_high_c, oil_crit_c; /* oil temperature limits */
+  double temp_hold_s;            /* over a limit this long before it sets */
 } EcuDiagConfig;
 
 typedef enum {
@@ -30,8 +35,16 @@ typedef enum {
   ECU_DTC_RPM2_FROZEN,
   ECU_DTC_RPM2_LOST,
   ECU_DTC_MISMATCH,
+  ECU_DTC_CHT_HIGH,
+  ECU_DTC_CHT_CRIT,
+  ECU_DTC_EGT_HIGH,
+  ECU_DTC_EGT_CRIT,
+  ECU_DTC_OIL_HIGH,
+  ECU_DTC_OIL_CRIT,
   ECU_DTC_COUNT
 } EcuDtcId;
+
+#define ECU_TEMP_CHECKS 6 /* ECU_DTC_CHT_HIGH .. ECU_DTC_OIL_CRIT */
 
 typedef struct {
   const char *code;        /* e.g. "E101" */
@@ -45,6 +58,7 @@ typedef struct {
   double pilot_throttle;
   double throttle_cmd;
   EcuSpeedSource source;
+  double cht_c, egt_c, oil_c;
 } EcuFreezeFrame;
 
 typedef struct {
@@ -67,12 +81,16 @@ typedef struct {
   EcuSpeedChannel ch[2];
   double mismatch_t, agree_t;
   int mismatch;
+  double temp_hold_t[ECU_TEMP_CHECKS];  /* time at or over each limit */
+  double temp_clear_t[ECU_TEMP_CHECKS]; /* time clear under it, once set */
+  int temp_active[ECU_TEMP_CHECKS];
   EcuDtc dtc[ECU_DTC_COUNT];
 } EcuDiag;
 
 typedef struct {
   double now_s, dt;
   double rpm[2];                       /* primary, secondary readings */
+  double cht_c, egt_c, oil_c;          /* hottest head, hottest port, oil */
   int running;                         /* engine running with ignition on */
   double pilot_throttle, throttle_cmd; /* for the freeze frame */
 } EcuDiagInput;

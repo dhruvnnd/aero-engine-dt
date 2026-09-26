@@ -59,10 +59,21 @@ void model_sync_step(ModelSync *sync, ModelState *state,
     /* two independent readings of the same crank speed, each with its own
      * injectable fault */
     const double true_rpm = engine_model_rpm(&state->engine);
+    /* and temperature probes: the hottest head and exhaust port, and the oil */
+    double cht_max = 0.0;
+    double egt_max = 0.0;
+    for (int i = 0; i < sync->engine_config.num_cylinders; i++) {
+      cht_max = state->cyl[i].cht_c > cht_max ? state->cyl[i].cht_c : cht_max;
+      egt_max = state->cyl[i].egt_c > egt_max ? state->cyl[i].egt_c : egt_max;
+    }
     const EcuSensors sensors = {
         ecu_sensor_fault_apply(&sync->ecu_rpm_fault, true_rpm),
         ecu_sensor_fault_apply(&sync->ecu_rpm2_fault, true_rpm),
-        state->engine.run_state == ENGINE_RUNNING, state->engine.ignition_on};
+        state->engine.run_state == ENGINE_RUNNING,
+        state->engine.ignition_on,
+        cht_max,
+        egt_max,
+        state->thermal.oil_temp_c};
     ecu_step(&state->ecu, &sync->engine_config.ecu, &sensors, &pilot,
              &actuators, dt);
   } else {

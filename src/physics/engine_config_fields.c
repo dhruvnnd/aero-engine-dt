@@ -166,6 +166,37 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      3.0, 10.0, 0.5, 30.0, "%.1f", 1.0, "s",
      "How long a sensor must be clean before its fault clears.\n"
      "Typical range: 3 - 10."},
+    {"diag_cht_high_c", "head temp high", "degC", G_ECU,
+     OFF(ecu.diag.cht_high_c), POS_EXCL, 180.0, 230.0, 100.0, 300.0, "%.0f",
+     1.0, "degC",
+     "Hottest cylinder head temperature at which the ECU sets its 'high'\n"
+     "code (a caution). Typical range: 180 - 230."},
+    {"diag_cht_crit_c", "head temp critical", "degC", G_ECU,
+     OFF(ecu.diag.cht_crit_c), POS_EXCL, 220.0, 270.0, 100.0, 350.0, "%.0f",
+     1.0, "degC",
+     "... and its 'critical' code (a warning). Typical range: 220 - 270."},
+    {"diag_egt_high_c", "exhaust temp high", "degC", G_ECU,
+     OFF(ecu.diag.egt_high_c), POS_EXCL, 700.0, 850.0, 400.0, 1000.0, "%.0f",
+     1.0, "degC",
+     "Hottest exhaust gas temperature for the 'high' code (a caution).\n"
+     "Typical range: 700 - 850."},
+    {"diag_egt_crit_c", "exhaust temp critical", "degC", G_ECU,
+     OFF(ecu.diag.egt_crit_c), POS_EXCL, 800.0, 950.0, 400.0, 1100.0, "%.0f",
+     1.0, "degC",
+     "... and for the 'critical' code (a warning). Typical range: 800 - 950."},
+    {"diag_oil_high_c", "oil temp high", "degC", G_ECU,
+     OFF(ecu.diag.oil_high_c), POS_EXCL, 100.0, 120.0, 60.0, 160.0, "%.0f",
+     1.0, "degC",
+     "Oil temperature for the 'high' code (a caution). Typical: 100 - 120."},
+    {"diag_oil_crit_c", "oil temp critical", "degC", G_ECU,
+     OFF(ecu.diag.oil_crit_c), POS_EXCL, 115.0, 140.0, 60.0, 180.0, "%.0f",
+     1.0, "degC",
+     "... and for the 'critical' code (a warning). Typical range: 115 - 140."},
+    {"diag_temp_hold_s", "over a limit for", "s", G_ECU,
+     OFF(ecu.diag.temp_hold_s), POS_EXCL, 1.0, 5.0, 0.2, 20.0, "%.1f", 1.0,
+     "s",
+     "How long a temperature must stay at or over a limit before its code\n"
+     "sets, so a brief spike does not. Typical range: 1 - 5."},
 
     /* ---- combustion model tuning ---- */
     {"wiebe_a", "Wiebe a", "", G_COMB, OFF(geom.wiebe_a), POS_EXCL, 3.0, 6.0,
