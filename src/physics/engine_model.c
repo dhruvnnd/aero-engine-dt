@@ -228,8 +228,7 @@ void engine_model_init(EngineState *state, const EngineConfig *config) {
   state->torque_nm = 0.0;
   state->run_state = ENGINE_RUNNING;
   state->ignition_on = 1;
-  state->governor_throttle = 0.0;
-  state->idle_integral = 0.0;
+  ecu_init(&state->ecu);
   state->trace = NULL;
 }
 
@@ -247,8 +246,7 @@ void engine_model_start(EngineState *state, const EngineConfig *config,
   state->torque_nm = 0.0;
   state->run_state = ENGINE_CRANKING;
   state->ignition_on = 1;
-  state->governor_throttle = 0.0;
-  state->idle_integral = 0.0;
+  ecu_reset_idle(&state->ecu); /* the operator's governor switch is kept */
   if (state->trace) {
     engine_trace_clear(state->trace); /* crank angle just jumped back to 0 */
   }
@@ -267,32 +265,18 @@ void engine_model_stop(EngineState *state) {
   /* Already ENGINE_STOPPED: no-op. */
 }
 
-/* The idle governor: a PI loop on crank speed that returns the throttle to add
- * this frame. It only acts on a running engine with ignition on, and hands
- * control back to the pilot once their throttle reaches its authority; in that
- * case the integrator is held (not reset), so a throttle chop finds the idle
- * throttle it had already found. Anti-windup: the integrator stays within
- * [0, idle_max_throttle]. */
-static double idle_governor_throttle(EngineState *state,
-                                     const EngineConfig *cfg,
-                                     double pilot_throttle, double dt) {
-  const double u_max = cfg->idle_max_throttle;
-  if (cfg->idle_target_rpm <= 0.0 || u_max <= 0.0 ||
-      state->run_state != ENGINE_RUNNING || !state->ignition_on) {
-    state->idle_integral = 0.0;
-    return 0.0;
-  }
-  const double error_rpm = cfg->idle_target_rpm - engine_model_rpm(state);
-  if (pilot_throttle < u_max) {
-    state->idle_integral += cfg->idle_ki * error_rpm * dt;
-    if (state->idle_integral < 0.0) {
-      state->idle_integral = 0.0;
-    } else if (state->idle_integral > u_max) {
-      state->idle_integral = u_max;
-    }
-  }
-  double u = cfg->idle_kp * error_rpm + state->idle_integral;
-  return u < 0.0 ? 0.0 : (u > u_max ? u_max : u);
+/* The ECU's throttle command for this frame. Runs before the stopped early-out
+ * so a stopped engine reports the governor as standing by. */
+static double ecu_throttle_command(EngineState *state, const EngineConfig *cfg,
+                                   double pilot_throttle, double dt) {
+  EcuIdleParams p;
+  p.target_rpm = cfg->idle_target_rpm;
+  p.kp = cfg->idle_kp;
+  p.ki = cfg->idle_ki;
+  p.max_throttle = cfg->idle_max_throttle;
+  return ecu_step(&state->ecu, &p, state->run_state == ENGINE_RUNNING,
+                  state->ignition_on, engine_model_rpm(state), pilot_throttle,
+                  dt);
 }
 
 #define ENGINE_SUB_STEP_DEG 1.0
@@ -303,6 +287,8 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
                        const CylinderConfig *cylinders,
                        CylinderState *cyl_states, double intake_temp_c,
                        double t, double dt) {
+  const double throttle_cmd =
+      ecu_throttle_command(state, config, input->throttle, dt);
   if (state->run_state == ENGINE_STOPPED) {
     state->torque_nm = 0.0;
     /* nothing is pumping the manifold any more: it equalises with ambient, so
@@ -323,13 +309,8 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
     vec[ENGINE_STATE_PRESSURE_BASE + i] = cyl_states[i].cyl_pressure_kpa;
   }
 
-  state->governor_throttle =
-      idle_governor_throttle(state, config, input->throttle, dt);
-
   EngineDerivParams params;
-  params.throttle = input->throttle > state->governor_throttle
-                        ? input->throttle
-                        : state->governor_throttle;
+  params.throttle = throttle_cmd;
   params.load_torque_nm = input->load_torque_nm;
   params.ambient_pressure_kpa = input->ambient_pressure_kpa;
   params.inertia_kg_m2 = config->inertia_kg_m2;

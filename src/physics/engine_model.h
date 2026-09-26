@@ -17,6 +17,7 @@ extern "C" {
 
 #include "physics/crank_thermo.h"
 #include "physics/cylinder.h"
+#include "physics/ecu.h"
 #include "physics/fuel.h"
 #include "physics/propeller.h"
 
@@ -41,9 +42,10 @@ typedef struct {
   EngineRunState run_state;
   int ignition_on;
 
-  /* Idle governor */
-  double governor_throttle;
-  double idle_integral;
+  /* The engine control unit (physics/ecu.h): the idle governor's loop state
+   * and the throttle command the engine received. Configured by
+   * EngineConfig.idle_*; the operator switch is ecu.idle_enabled. */
+  EcuState ecu;
 
   EngineTrace *trace;
 } EngineState;
