@@ -22,7 +22,8 @@ typedef struct {
   LubeConfig lube_config;
   ElecConfig elec_config;
   CylinderConfig cyl_config[ENGINE_MAX_CYLINDERS]; /* one per cylinder slot */
-  EcuSensorFault ecu_rpm_fault; /* injected fault on the ECU's crank-speed input */
+  EcuSensorFault ecu_rpm_fault;  /* injected faults on the ECU's crank-speed */
+  EcuSensorFault ecu_rpm2_fault; /* and redundant (alternator) speed inputs */
   double sim_time_s; /* accumulated simulated time, passed to the integrators */
 } ModelSync;
 

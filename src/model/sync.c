@@ -1,5 +1,7 @@
 #include "model/sync.h"
 
+#include <string.h>
+
 #include "physics/combustion.h"
 #include "physics/cylinder.h"
 #include "physics/ecu.h"
@@ -20,9 +22,8 @@ void model_sync_init(ModelSync *sync) {
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     sync->cyl_config[i] = cylinder_config_default();
   }
-  ecu_sensor_fault_set(&sync->ecu_rpm_fault, ECU_FAULT_NONE, 0.0);
-  sync->ecu_rpm_fault.held = 0.0;
-  sync->ecu_rpm_fault.held_valid = 0;
+  memset(&sync->ecu_rpm_fault, 0, sizeof sync->ecu_rpm_fault);
+  memset(&sync->ecu_rpm2_fault, 0, sizeof sync->ecu_rpm2_fault);
   sync->sim_time_s = 0.0;
 }
 
@@ -55,11 +56,13 @@ void model_sync_step(ModelSync *sync, ModelState *state,
   const EcuPilotCmd pilot = {input->throttle};
   EcuActuators actuators;
   if (sync->engine_config.ecu_fitted) {
-    const EcuSensors sensors = {ecu_sensor_fault_apply(
-                                    &sync->ecu_rpm_fault,
-                                    engine_model_rpm(&state->engine)),
-                                state->engine.run_state == ENGINE_RUNNING,
-                                state->engine.ignition_on};
+    /* two independent readings of the same crank speed, each with its own
+     * injectable fault */
+    const double true_rpm = engine_model_rpm(&state->engine);
+    const EcuSensors sensors = {
+        ecu_sensor_fault_apply(&sync->ecu_rpm_fault, true_rpm),
+        ecu_sensor_fault_apply(&sync->ecu_rpm2_fault, true_rpm),
+        state->engine.run_state == ENGINE_RUNNING, state->engine.ignition_on};
     ecu_step(&state->ecu, &sync->engine_config.ecu, &sensors, &pilot,
              &actuators, dt);
   } else {

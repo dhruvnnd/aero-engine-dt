@@ -8,23 +8,23 @@
 
 static const ImVec4 COL_OK(0.35f, 0.80f, 0.45f, 1.0f);
 static const ImVec4 COL_CAUTION(1.00f, 0.75f, 0.20f, 1.0f);
+static const ImVec4 COL_WARNING(1.00f, 0.35f, 0.30f, 1.0f);
 static const ImVec4 COL_DIM(0.60f, 0.62f, 0.62f, 1.0f);
 
-/* What each fault does, in a line. */
+static const char *CHANNEL_NAME[2] = {"crank speed", "alternator speed"};
+
 static const char *fault_hint(EcuFaultKind k) {
   switch (k) {
   case ECU_FAULT_OFFSET:
-    return "The ECU reads the speed high or low, so it holds the wrong speed.";
+    return "Reads the speed high or low.";
   case ECU_FAULT_SCALE:
-    return "The ECU reads the speed scaled: the same error grows with speed.";
+    return "Reads the speed scaled: the error grows with speed.";
   case ECU_FAULT_STUCK:
-    return "The reading freezes: the ECU can't see a load step, so it won't "
-           "correct it.";
+    return "The reading freezes.";
   case ECU_FAULT_DROPOUT:
-    return "The ECU reads 0: it sees a huge error and opens the throttle to "
-           "its limit.";
+    return "Reads 0.";
   default:
-    return "The ECU reads the true crank speed.";
+    return "Reads the true crank speed.";
   }
 }
 
@@ -51,10 +51,76 @@ static bool begin_signal_table(const char *id) {
   return true;
 }
 
+/* One speed sensor's row: what the ECU reads, and whether it is being used. */
+static void speed_row(int channel, double reads, double truth,
+                      const EcuSensorFault &fault, bool in_use) {
+  char value[32];
+  char note[96];
+  snprintf(value, sizeof value, "%.0f rpm", reads);
+  const bool faulted = fault.kind != ECU_FAULT_NONE;
+  if (faulted) {
+    snprintf(note, sizeof note, "FAULT (%s): true %.0f rpm%s",
+             ecu_fault_kind_name(fault.kind), truth,
+             in_use ? "" : "  [not used]");
+  } else {
+    snprintf(note, sizeof note, "%s", in_use ? "in use" : "not used");
+  }
+  row(CHANNEL_NAME[channel], value, note, faulted ? COL_CAUTION : COL_OK);
+}
+
+/* Fault controls for one speed sensor. */
+static void fault_row(int channel, const EcuSensorFault &f, EcuIoActions *act) {
+  ImGui::PushID(channel);
+  ImGui::TextUnformatted(CHANNEL_NAME[channel]);
+  int kind = (int)f.kind;
+  bool changed = false;
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
+  if (ImGui::BeginCombo("##kind", ecu_fault_kind_name(f.kind))) {
+    for (int k = 0; k < (int)ECU_FAULT_KIND_COUNT; k++) {
+      if (ImGui::Selectable(ecu_fault_kind_name((EcuFaultKind)k), k == kind)) {
+        kind = k;
+        changed = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  double value = f.value;
+  if (kind == (int)ECU_FAULT_OFFSET || kind == (int)ECU_FAULT_SCALE) {
+    if (changed && f.kind != (EcuFaultKind)kind) {
+      value = kind == (int)ECU_FAULT_OFFSET ? 100.0 : 0.85; /* a useful start */
+    }
+    const bool offset = kind == (int)ECU_FAULT_OFFSET;
+    const double lo = offset ? -400.0 : 0.5;
+    const double hi = offset ? 400.0 : 1.5;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9.0f);
+    if (ImGui::SliderScalar("##value", ImGuiDataType_Double, &value, &lo, &hi,
+                            offset ? "%+.0f rpm" : "x %.2f",
+                            ImGuiSliderFlags_AlwaysClamp)) {
+      changed = true;
+    }
+  }
+  if (f.kind != ECU_FAULT_NONE) {
+    ImGui::SameLine();
+    if (ImGui::Button("Clear")) {
+      kind = (int)ECU_FAULT_NONE;
+      changed = true;
+    }
+  }
+  ImGui::TextColored(COL_DIM, "%s", fault_hint((EcuFaultKind)kind));
+  if (changed) {
+    act->set_fault = true;
+    act->channel = channel;
+    act->kind = (EcuFaultKind)kind;
+    act->value = value;
+  }
+  ImGui::PopID();
+}
+
 EcuIoActions ecu_io_panel_draw(bool *open, const ModelState *s,
-                               const EcuSensorFault *rpm_fault) {
+                               const EcuSensorFault faults[2]) {
   EcuIoActions act = {};
-  ImGui::SetNextWindowSize(ImVec2(440.0f, 480.0f), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(460.0f, 560.0f), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin(PANEL_ECU_IO, open)) {
     ImGui::End();
     return act;
@@ -74,19 +140,21 @@ EcuIoActions ecu_io_panel_draw(bool *open, const ModelState *s,
     return act;
   }
 
-  const bool faulted = rpm_fault->kind != ECU_FAULT_NONE;
-
   ImGui::SeparatorText("Inputs");
   if (begin_signal_table("io_in")) {
-    snprintf(buf, sizeof buf, "%.0f rpm", e.rpm_seen);
-    if (faulted) {
-      char note[64];
-      snprintf(note, sizeof note, "FAULT (%s): true speed %.0f rpm",
-               ecu_fault_kind_name(rpm_fault->kind), s->rpm);
-      row("crank speed", buf, note, COL_CAUTION);
-    } else {
-      row("crank speed", buf, "sensor, reads true");
-    }
+    speed_row(0, e.rpm1_seen, s->rpm, faults[0],
+              e.speed_source == ECU_SRC_PRIMARY);
+    speed_row(1, e.rpm2_seen, s->rpm, faults[1],
+              e.speed_source == ECU_SRC_SECONDARY);
+    const bool degraded = e.diag_enabled && e.speed_source != ECU_SRC_PRIMARY;
+    row("speed used", ecu_speed_source_name(e.speed_source),
+        !e.diag_enabled ? "diagnostics off: trusts the crank sensor"
+        : e.speed_source == ECU_SRC_NONE ? "no trusted speed: limp-home"
+        : degraded                       ? "crank sensor not trusted"
+                                         : "",
+        e.speed_source == ECU_SRC_NONE ? COL_WARNING
+        : degraded                     ? COL_CAUTION
+                                       : COL_OK);
     row("engine running", s->engine.run_state == ENGINE_RUNNING ? "yes" : "no",
         "");
     row("ignition", s->engine.ignition_on ? "on" : "off", "");
@@ -107,51 +175,9 @@ EcuIoActions ecu_io_panel_draw(bool *open, const ModelState *s,
     ImGui::EndTable();
   }
 
-  ImGui::SeparatorText("Sensor fault: crank speed");
-  int kind = (int)rpm_fault->kind;
-  bool changed = false;
-  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9.0f);
-  if (ImGui::BeginCombo("##kind", ecu_fault_kind_name(rpm_fault->kind))) {
-    for (int k = 0; k < (int)ECU_FAULT_KIND_COUNT; k++) {
-      const bool selected = k == kind;
-      if (ImGui::Selectable(ecu_fault_kind_name((EcuFaultKind)k), selected)) {
-        kind = k;
-        changed = true;
-      }
-    }
-    ImGui::EndCombo();
-  }
-  double value = rpm_fault->value;
-  if (kind == (int)ECU_FAULT_OFFSET || kind == (int)ECU_FAULT_SCALE) {
-    if (changed && rpm_fault->kind != (EcuFaultKind)kind) {
-      value = kind == (int)ECU_FAULT_OFFSET ? 100.0 : 0.85; /* a useful start */
-    }
-    const bool offset = kind == (int)ECU_FAULT_OFFSET;
-    const double lo = offset ? -400.0 : 0.5;
-    const double hi = offset ? 400.0 : 1.5;
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    if (ImGui::SliderScalar("##value", ImGuiDataType_Double, &value, &lo, &hi,
-                            offset ? "%+.0f rpm" : "x %.2f",
-                            ImGuiSliderFlags_AlwaysClamp)) {
-      changed = true;
-    }
-  }
-  if (faulted) {
-    ImGui::SameLine();
-    if (ImGui::Button("Clear")) {
-      kind = (int)ECU_FAULT_NONE;
-      changed = true;
-    }
-  }
-  ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextColored(COL_DIM, "%s", fault_hint((EcuFaultKind)kind));
-  ImGui::PopTextWrapPos();
-
-  if (changed) {
-    act.set_rpm_fault = true;
-    act.kind = (EcuFaultKind)kind;
-    act.value = value;
+  ImGui::SeparatorText("Sensor faults");
+  for (int c = 0; c < 2; c++) {
+    fault_row(c, faults[c], &act);
   }
 
   ImGui::End();

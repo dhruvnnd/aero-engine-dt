@@ -140,6 +140,32 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      OFF(ecu.idle_max_throttle), 0.0, 1.0, 0, 0.1, 0.25, 0.0, 0.5, "%.3f", 1.0, "",
      "Most throttle the governor may add, and the pilot throttle above which\n"
      "it steps aside. Typical range: 0.1 - 0.25; must be in [0, 1]."},
+    {"limp_throttle", "limp-home throttle", "", G_ECU, OFF(ecu.limp_throttle),
+     0.0, 1.0, 0, 0.05, 0.10, 0.0, 0.3, "%.3f", 1.0, "",
+     "Fixed idle throttle the ECU uses when it has no trusted speed sensor\n"
+     "(it drops the governor for this). About what the engine needs to idle.\n"
+     "Typical range: 0.05 - 0.10; must be in [0, 1]."},
+    {"diag_jump_rpm", "implausible jump", "rpm", G_ECU, OFF(ecu.diag.jump_rpm),
+     POS_EXCL, 30.0, 80.0, 5.0, 300.0, "%.0f", 1.0, "rpm",
+     "A speed reading that steps by more than this (and faster than 3000\n"
+     "rpm/s) is a jump: the crank cannot move that fast. Typical: 30 - 80."},
+    {"diag_mismatch_rpm", "sensors disagree by", "rpm", G_ECU,
+     OFF(ecu.diag.mismatch_rpm), POS_EXCL, 40.0, 120.0, 10.0, 400.0, "%.0f",
+     1.0, "rpm",
+     "Two speed sensors differing by more than this disagree.\n"
+     "Typical range: 40 - 120."},
+    {"diag_mismatch_s", "disagree for", "s", G_ECU, OFF(ecu.diag.mismatch_s),
+     POS_EXCL, 0.5, 2.0, 0.1, 10.0, "%.1f", 1.0, "s",
+     "How long the sensors must disagree before a mismatch is declared.\n"
+     "Typical range: 0.5 - 2."},
+    {"diag_frozen_s", "frozen after", "s", G_ECU, OFF(ecu.diag.frozen_s),
+     POS_EXCL, 1.0, 5.0, 0.2, 20.0, "%.1f", 1.0, "s",
+     "A speed reading that has not changed at all for this long is frozen.\n"
+     "Typical range: 1 - 5."},
+    {"diag_heal_s", "heal after", "s", G_ECU, OFF(ecu.diag.heal_s), POS_EXCL,
+     3.0, 10.0, 0.5, 30.0, "%.1f", 1.0, "s",
+     "How long a sensor must be clean before its fault clears.\n"
+     "Typical range: 3 - 10."},
 
     /* ---- combustion model tuning ---- */
     {"wiebe_a", "Wiebe a", "", G_COMB, OFF(geom.wiebe_a), POS_EXCL, 3.0, 6.0,

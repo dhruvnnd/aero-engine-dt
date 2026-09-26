@@ -25,6 +25,7 @@ static ImVec4 mode_color(const EcuState &e) {
   case ECU_IDLE_ACTIVE:
     return holding(e) ? COL_OK : COL_INFO;
   case ECU_IDLE_LIMITED:
+  case ECU_IDLE_LIMP:
     return COL_WARNING;
   case ECU_IDLE_OFF:
     return COL_CAUTION;
@@ -57,6 +58,9 @@ static const char *explanation(const EcuState &e) {
   case ECU_IDLE_LIMITED:
     return "At full authority and still below the target: the load is more "
            "than it can carry.";
+  case ECU_IDLE_LIMP:
+    return "No trusted speed sensor: the governor is dropped for a fixed idle "
+           "throttle. See ECU Faults.";
   case ECU_IDLE_ACTIVE:
     return holding(e) ? "The throttle it adds balances the load."
                       : "Moving the throttle to bring the speed back to the "
@@ -121,7 +125,12 @@ EcuActions ecu_panel_draw(bool *open, const ModelState *s,
                             ImGui::GetFontSize() * 5.0f);
     ImGui::TableSetupColumn("unit", ImGuiTableColumnFlags_WidthStretch);
     row("target", "rpm", "%.0f", e.idle_target_rpm);
-    row("ECU reads", "rpm", "%.0f", e.rpm_seen);
+    char reads_unit[32] = "rpm";
+    if (e.diag_enabled && e.speed_source != ECU_SRC_PRIMARY) {
+      snprintf(reads_unit, sizeof reads_unit, "rpm (%s sensor)",
+               ecu_speed_source_name(e.speed_source));
+    }
+    row("ECU reads", reads_unit, "%.0f", e.rpm_seen);
     if (fabs(e.rpm_seen - s->rpm) > 0.5) { /* a sensor fault: the ECU is misled */
       row("true speed", "rpm", "%.0f", s->rpm);
     }

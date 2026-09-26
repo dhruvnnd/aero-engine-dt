@@ -6,7 +6,7 @@
  * engine. */
 
 static EcuConfig cfg(void) {
-  EcuConfig c;
+  EcuConfig c = ecu_config_default();
   c.idle_target_rpm = 800.0;
   c.idle_kp = 0.0003;
   c.idle_ki = 0.0003;
@@ -14,10 +14,17 @@ static EcuConfig cfg(void) {
   return c;
 }
 
+/* A governor-only ECU: these tests feed hand-made constant readings, which the
+ * diagnostics would (rightly) flag as frozen, so they run without them. */
+static void init(EcuState *e) {
+  ecu_init(e);
+  ecu_set_diag_enabled(e, 0);
+}
+
 /* One step; returns the throttle the ECU would drive. */
 static double step(EcuState *e, const EcuConfig *c, double rpm, double pilot,
                    double dt, int running, int ignition) {
-  const EcuSensors s = {rpm, running, ignition};
+  const EcuSensors s = {rpm, rpm, running, ignition};
   const EcuPilotCmd p = {pilot};
   EcuActuators out;
   ecu_step(e, c, &s, &p, &out, dt);
@@ -30,6 +37,9 @@ static void test_default_config_is_sane(void) {
   CHECK(c.idle_target_rpm > 0.0);
   CHECK(c.idle_kp >= 0.0 && c.idle_ki >= 0.0);
   CHECK(c.idle_max_throttle > 0.0 && c.idle_max_throttle <= 1.0);
+  CHECK(c.limp_throttle > 0.0 && c.limp_throttle <= 1.0);
+  CHECK(c.diag.jump_rpm > 0.0 && c.diag.mismatch_rpm > 0.0);
+  CHECK(c.diag.mismatch_s > 0.0 && c.diag.frozen_s > 0.0 && c.diag.heal_s > 0.0);
 }
 
 static void test_init_is_fitted_enabled_and_zeroed(void) {
@@ -37,6 +47,9 @@ static void test_init_is_fitted_enabled_and_zeroed(void) {
   ecu_init(&e);
   CHECK(e.fitted == 1);
   CHECK(e.idle_enabled == 1);
+  CHECK(e.diag_enabled == 1);
+  CHECK(e.speed_source == ECU_SRC_PRIMARY);
+  CHECK(ecu_diag_latched_count(&e.diag) == 0);
   CHECK_NEAR(e.idle_i_term, 0.0, 0.0);
   CHECK_NEAR(e.idle_throttle, 0.0, 0.0);
   CHECK_NEAR(e.throttle_cmd, 0.0, 0.0);
@@ -45,7 +58,7 @@ static void test_init_is_fitted_enabled_and_zeroed(void) {
 /* The loop terms are exactly what the description says. */
 static void test_terms_follow_the_pi_law(void) {
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   EcuConfig c = cfg();
   double cmd = step(&e, &c, 700.0, 0.0, 0.1, 1, 1); /* 100 rpm low */
   CHECK(e.idle_mode == ECU_IDLE_ACTIVE);
@@ -61,7 +74,7 @@ static void test_terms_follow_the_pi_law(void) {
 
 static void test_integrator_accumulates(void) {
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   EcuConfig c = cfg();
   double prev = 0.0;
   for (int i = 0; i < 10; i++) {
@@ -76,7 +89,7 @@ static void test_integrator_accumulates(void) {
  * without going negative: it can only add throttle. */
 static void test_overspeed_adds_nothing_and_never_goes_negative(void) {
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   EcuConfig c = cfg();
   for (int i = 0; i < 20; i++) {
     step(&e, &c, 700.0, 0.0, 0.1, 1, 1);
@@ -94,7 +107,7 @@ static void test_overspeed_adds_nothing_and_never_goes_negative(void) {
 
 static void test_authority_clamp_and_limited_mode(void) {
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   EcuConfig c = cfg();
   for (int i = 0; i < 2000; i++) {
     step(&e, &c, 400.0, 0.0, 0.1, 1, 1);
@@ -109,13 +122,13 @@ static void test_authority_clamp_and_limited_mode(void) {
 /* max(pilot, governor): the pilot's throttle is never reduced. */
 static void test_command_is_max_of_pilot_and_governor(void) {
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   EcuConfig c = cfg();
   double cmd = step(&e, &c, 700.0, 0.02, 0.1, 1, 1); /* governor > 0.02 */
   CHECK(cmd > 0.02);
   CHECK_NEAR(cmd, e.idle_throttle, 1e-12);
 
-  ecu_init(&e);
+  init(&e);
   cmd = step(&e, &c, 790.0, 0.10, 0.1, 1, 1); /* pilot > governor */
   CHECK_NEAR(cmd, 0.10, 1e-12);
   CHECK_NEAR(e.pilot_throttle, 0.10, 1e-12);
@@ -124,7 +137,7 @@ static void test_command_is_max_of_pilot_and_governor(void) {
 /* At/above the authority the pilot is in control and the integrator is held. */
 static void test_pilot_in_control_holds_the_integrator(void) {
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   EcuConfig c = cfg();
   for (int i = 0; i < 50; i++) {
     step(&e, &c, 740.0, 0.0, 0.1, 1, 1);
@@ -147,7 +160,7 @@ static void test_pilot_in_control_holds_the_integrator(void) {
 static void test_operator_off_disabled_and_standby(void) {
   EcuConfig c = cfg();
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   for (int i = 0; i < 20; i++) {
     step(&e, &c, 700.0, 0.0, 0.1, 1, 1);
   }
@@ -192,7 +205,7 @@ static void test_operator_off_disabled_and_standby(void) {
 static void test_reset_idle_keeps_the_operator_switch(void) {
   EcuConfig c = cfg();
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   ecu_set_idle_enabled(&e, 0);
   ecu_reset_idle(&e);
   CHECK(e.idle_enabled == 0);
@@ -212,7 +225,7 @@ static void test_reset_idle_keeps_the_operator_switch(void) {
 static void test_bypass_passes_the_pilot_straight_through(void) {
   EcuConfig c = cfg();
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   for (int i = 0; i < 20; i++) {
     step(&e, &c, 700.0, 0.0, 0.1, 1, 1);
   }
@@ -289,7 +302,7 @@ static void test_fault_kind_names_exist_and_differ(void) {
 /* The state records what the ECU read, not the truth. */
 static void test_state_records_the_reading_the_ecu_used(void) {
   EcuState e;
-  ecu_init(&e);
+  init(&e);
   CHECK_NEAR(e.rpm_seen, 0.0, 0.0);
   EcuConfig c = cfg();
   step(&e, &c, 733.0, 0.0, 0.1, 1, 1);
@@ -299,7 +312,8 @@ static void test_state_records_the_reading_the_ecu_used(void) {
 static void test_mode_names_exist_and_differ(void) {
   const EcuIdleMode modes[] = {ECU_IDLE_DISABLED, ECU_IDLE_OFF,
                                ECU_IDLE_STANDBY,  ECU_IDLE_PILOT,
-                               ECU_IDLE_ACTIVE,   ECU_IDLE_LIMITED};
+                               ECU_IDLE_ACTIVE,   ECU_IDLE_LIMITED,
+                               ECU_IDLE_LIMP};
   const int n = (int)(sizeof modes / sizeof modes[0]);
   for (int i = 0; i < n; i++) {
     const char *a = ecu_idle_mode_name(modes[i]);

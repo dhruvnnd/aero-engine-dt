@@ -33,6 +33,7 @@
 #include "ui/controls_panel.h"
 #include "ui/cyl_trends_panel.h"
 #include "ui/ecu_compare_panel.h"
+#include "ui/ecu_faults_panel.h"
 #include "ui/ecu_io_panel.h"
 #include "ui/ecu_panel.h"
 #include "ui/ecu_trends_panel.h"
@@ -95,6 +96,8 @@ typedef struct {
   EcuCompareTrends ecu_compare_trends;
   EcuTrends ecu_trends;      /* idle-governor loop history for the ECU panel */
   EcuIdleMode logged_ecu_mode; /* governor mode last checked for event-log lines */
+  int logged_dtc_active[ECU_DTC_COUNT]; /* fault codes last written to the log */
+  EcuSpeedSource logged_speed_source;   /* speed sensor last written to the log */
   EngineTrace engine_trace; /* sub-step torque/pressure trace for the Torque
                              * Ripple panel; attached to state.engine */
   EventLog events;
@@ -210,9 +213,13 @@ static void idle_governor_toggle(AppState *app) {
   }
 }
 
-/* Injects (or clears) a fault on the ECU's crank-speed input. */
-static void ecu_rpm_fault_set(AppState *app, EcuFaultKind kind, double value) {
-  EcuSensorFault *f = &app->sync.ecu_rpm_fault;
+/* Injects (or clears) a fault on one of the ECU's speed sensors: 0 = crank
+ * (primary), 1 = alternator (secondary). */
+static void ecu_speed_fault_set(AppState *app, int channel, EcuFaultKind kind,
+                                double value) {
+  EcuSensorFault *f =
+      channel == 0 ? &app->sync.ecu_rpm_fault : &app->sync.ecu_rpm2_fault;
+  const char *name = channel == 0 ? "crank" : "alternator";
   const EcuFaultKind before = f->kind;
   ecu_sensor_fault_set(f, kind, value);
   if (kind == before) {
@@ -220,10 +227,64 @@ static void ecu_rpm_fault_set(AppState *app, EcuFaultKind kind, double value) {
   }
   if (kind == ECU_FAULT_NONE) {
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
-                   "crank-speed sensor fault cleared");
+                   "%s speed sensor fault cleared", name);
   } else {
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING, "ECU",
-                   "crank-speed sensor fault: %s", ecu_fault_kind_name(kind));
+                   "%s speed sensor fault injected: %s", name,
+                   ecu_fault_kind_name(kind));
+  }
+}
+
+/* The operator switch for the ECU's diagnostics and fallback. */
+static void ecu_diagnostics_toggle(AppState *app) {
+  EcuState *ecu = &app->state.ecu;
+  if (!ecu->fitted) {
+    return;
+  }
+  ecu_set_diag_enabled(ecu, !ecu->diag_enabled);
+  if (ecu->diag_enabled) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                   "diagnostics on");
+  } else {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION, "ECU",
+                   "diagnostics off -- the ECU now trusts the crank sensor "
+                   "without checking");
+  }
+}
+
+/* Event-log lines for what the ECU's diagnostics did since the last frame: a
+ * code setting or healing, and a change of the speed sensor it acts on. */
+static void ecu_diag_log_changes(AppState *app) {
+  const EcuState &e = app->state.ecu;
+  if (!e.fitted || !e.diag_enabled) {
+    return;
+  }
+  for (int i = 0; i < (int)ECU_DTC_COUNT; i++) {
+    const int now = e.diag.dtc[i].active;
+    if (now == app->logged_dtc_active[i]) {
+      continue;
+    }
+    const EcuDtcInfo *info = ecu_dtc_info((EcuDtcId)i);
+    if (now) {
+      event_log_push(&app->events, app->sync.sim_time_s,
+                     info->severity ? EVENT_WARNING : EVENT_CAUTION, "ECU",
+                     "fault %s: %s", info->code, info->description);
+    } else {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                     "fault %s healed", info->code);
+    }
+    app->logged_dtc_active[i] = now;
+  }
+  if (e.speed_source != app->logged_speed_source) {
+    if (e.speed_source == ECU_SRC_NONE) {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING, "ECU",
+                     "no trusted speed sensor -- limp-home");
+    } else {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                     "now using the %s speed sensor",
+                     ecu_speed_source_name(e.speed_source));
+    }
+    app->logged_speed_source = e.speed_source;
   }
 }
 
@@ -263,6 +324,10 @@ static void reset_simulation_state(AppState *app) {
   ecu_trends_init(&app->ecu_trends);
   ecu_compare_init(&app->ecu_compare_trends);
   app->logged_ecu_mode = app->state.ecu.idle_mode;
+  for (int i = 0; i < (int)ECU_DTC_COUNT; i++) {
+    app->logged_dtc_active[i] = 0;
+  }
+  app->logged_speed_source = ECU_SRC_PRIMARY;
   app->sample_accum_s = 0.0;
 
   event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
@@ -631,6 +696,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
     app->logged_ecu_mode = ecu_mode;
   }
+  ecu_diag_log_changes(app);
 
   /* Refresh the instrument feed + trend rings at a fixed cadence (not per
    * render frame), so the gauges read a lively ~10 Hz sensor sample rather
@@ -746,6 +812,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("ECU", NULL, &app->panels.ecu);
       ImGui::MenuItem("ECU Trends", NULL, &app->panels.ecu_trends);
       ImGui::MenuItem("ECU I/O", NULL, &app->panels.ecu_io);
+      ImGui::MenuItem("ECU Faults", NULL, &app->panels.ecu_faults);
       ImGui::MenuItem("ECU Compare", NULL, &app->panels.ecu_compare);
       ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
       ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
@@ -829,10 +896,27 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
   }
   if (app->panels.ecu_io) {
-    const EcuIoActions ia = ecu_io_panel_draw(&app->panels.ecu_io, &app->state,
-                                              &app->sync.ecu_rpm_fault);
-    if (ia.set_rpm_fault) {
-      ecu_rpm_fault_set(app, ia.kind, ia.value);
+    const EcuSensorFault faults[2] = {app->sync.ecu_rpm_fault,
+                                      app->sync.ecu_rpm2_fault};
+    const EcuIoActions ia =
+        ecu_io_panel_draw(&app->panels.ecu_io, &app->state, faults);
+    if (ia.set_fault) {
+      ecu_speed_fault_set(app, ia.channel, ia.kind, ia.value);
+    }
+  }
+  if (app->panels.ecu_faults) {
+    const EcuFaultsActions fa =
+        ecu_faults_panel_draw(&app->panels.ecu_faults, &app->state);
+    if (fa.toggle_diagnostics) {
+      ecu_diagnostics_toggle(app);
+    }
+    if (fa.clear_codes) {
+      ecu_clear_codes(&app->state.ecu);
+      for (int i = 0; i < (int)ECU_DTC_COUNT; i++) {
+        app->logged_dtc_active[i] = 0; /* a fault still present logs again */
+      }
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                     "fault codes cleared");
     }
   }
   if (app->panels.ecu_compare) {

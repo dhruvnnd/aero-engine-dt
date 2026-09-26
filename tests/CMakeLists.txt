@@ -34,6 +34,7 @@ set(ENGINE_CORE_TESTS
   test_ecu
   test_ecu_trends
   test_ecu_integration
+  test_ecu_diag
   test_ecu_compare
   test_run_log
 )
