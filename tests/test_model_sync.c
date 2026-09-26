@@ -278,7 +278,7 @@ static void test_idle_no_longer_runs_away_with_cylinder_count(void) {
     ModelState governed = idle_state(n, 800.0, 0.0, 0);
     CHECK(governed.engine.run_state == ENGINE_RUNNING);
     CHECK_NEAR(governed.rpm, 800.0, 25.0);
-    CHECK(governed.engine.governor_throttle < 0.15);
+    CHECK(governed.engine.ecu.idle_throttle < 0.15);
   }
 }
 

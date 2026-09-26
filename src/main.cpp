@@ -23,6 +23,7 @@
 #include "platform/sdl/sdl_window.h"
 #include "telemetry/annunciator.h"
 #include "telemetry/cyl_trends.h"
+#include "telemetry/ecu_trends.h"
 #include "telemetry/event_log.h"
 #include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
@@ -30,6 +31,8 @@
 #include "ui/alarm_strip.h"
 #include "ui/controls_panel.h"
 #include "ui/cyl_trends_panel.h"
+#include "ui/ecu_panel.h"
+#include "ui/ecu_trends_panel.h"
 #include "ui/engine_spec_panel.h"
 #include "ui/event_log_panel.h"
 #include "ui/faults_panel.h"
@@ -84,6 +87,8 @@ typedef struct {
   int logged_speed_idx;
   Trends trends;
   CylTrends cyl_trends;
+  EcuTrends ecu_trends;      /* idle-governor loop history for the ECU panel */
+  EcuIdleMode logged_ecu_mode; /* governor mode last checked for event-log lines */
   EngineTrace engine_trace; /* sub-step torque/pressure trace for the Torque
                              * Ripple panel; attached to state.engine */
   EventLog events;
@@ -172,6 +177,25 @@ static void engine_stop(AppState *app) {
   }
 }
 
+/* The operator switch for the ECU's idle governor. */
+static void idle_governor_toggle(AppState *app) {
+  EcuState *ecu = &app->state.engine.ecu;
+  if (ecu->idle_mode == ECU_IDLE_DISABLED) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                   "no idle governor configured (idle_target_rpm = 0)");
+    return;
+  }
+  ecu_set_idle_enabled(ecu, !ecu->idle_enabled);
+  if (ecu->idle_enabled) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                   "idle governor on");
+  } else {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION, "ECU",
+                   "idle governor off -- idle will sag to the engine's natural "
+                   "speed");
+  }
+}
+
 /* Cold, stopped engine at sea level, with every monitor and trend cleared.
  * Keeps sync (config, faults, clock), input, sensor and the event log. */
 static void reset_simulation_state(AppState *app) {
@@ -194,6 +218,8 @@ static void reset_simulation_state(AppState *app) {
   annunciator_init(&app->ann);
   trends_init(&app->trends);
   cyl_trends_init(&app->cyl_trends);
+  ecu_trends_init(&app->ecu_trends);
+  app->logged_ecu_mode = app->state.engine.ecu.idle_mode;
   app->sample_accum_s = 0.0;
 
   event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
@@ -454,6 +480,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     engine_stop(app);
   }
 
+  if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
+      event->key.key == SDLK_K) {
+    idle_governor_toggle(app);
+  }
+
   /* Handle fullscreen */
   if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
       event->key.key == SDLK_F && app->window_ctx.window) {
@@ -533,6 +564,25 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                    "engine caught, running");
   }
 
+  /* ECU events worth a log line: the governor running out of authority (and
+   * recovering). The rest of its transitions follow the pilot's throttle and
+   * would only add noise. */
+  const EcuIdleMode ecu_mode = app->state.engine.ecu.idle_mode;
+  if (ecu_mode != app->logged_ecu_mode) {
+    if (ecu_mode == ECU_IDLE_LIMITED) {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_CAUTION, "ECU",
+                     "idle governor at its authority limit -- %.0f rpm below "
+                     "the %.0f rpm target",
+                     app->state.engine.ecu.idle_error_rpm,
+                     app->state.engine.ecu.idle_target_rpm);
+    } else if (app->logged_ecu_mode == ECU_IDLE_LIMITED &&
+               ecu_mode == ECU_IDLE_ACTIVE) {
+      event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                     "idle governor back within its authority");
+    }
+    app->logged_ecu_mode = ecu_mode;
+  }
+
   /* Refresh the instrument feed + trend rings at a fixed cadence (not per
    * render frame), so the gauges read a lively ~10 Hz sensor sample rather
    * than fresh static every frame. */
@@ -543,6 +593,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     trends_sample(&app->trends, sampled);
     cyl_trends_sample(&app->cyl_trends, sampled,
                       app->sync.engine_config.num_cylinders);
+    ecu_trends_sample(&app->ecu_trends, &app->state); /* the ECU's own numbers
+                                                       * are exact, not sensed */
     fault_monitor_check(&app->faults, &app->events, sampled,
                         app->sync.sim_time_s);
     annunciator_update(&app->ann, sampled);
@@ -638,6 +690,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("Trends", NULL, &app->panels.trends);
       ImGui::MenuItem("Cylinder Trends", NULL, &app->panels.cyl_trends);
       ImGui::MenuItem("Torque Ripple", NULL, &app->panels.torque_trace);
+      ImGui::MenuItem("ECU", NULL, &app->panels.ecu);
+      ImGui::MenuItem("ECU Trends", NULL, &app->panels.ecu_trends);
       ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
       ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
       ImGui::Separator();
@@ -685,6 +739,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (act.stop_engine) {
       engine_stop(app);
     }
+    if (act.toggle_idle_governor) {
+      idle_governor_toggle(app);
+    }
   }
   if (app->panels.faults) {
     faults_panel_draw(&app->panels.faults, app->sync.cyl_config,
@@ -708,6 +765,17 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     cyl_trends_panel_draw(&app->panels.cyl_trends, &app->cyl_trends,
                           app->sync.engine_config.num_cylinders,
                           SAMPLE_PERIOD_S);
+  }
+  if (app->panels.ecu) {
+    const EcuActions ea =
+        ecu_panel_draw(&app->panels.ecu, &app->state, &app->sync.engine_config);
+    if (ea.toggle_idle_governor) {
+      idle_governor_toggle(app);
+    }
+  }
+  if (app->panels.ecu_trends) {
+    ecu_trends_panel_draw(&app->panels.ecu_trends, &app->ecu_trends,
+                          &app->sync.engine_config, SAMPLE_PERIOD_S);
   }
   if (app->panels.torque_trace) {
     torque_trace_panel_draw(&app->panels.torque_trace, &app->engine_trace,
