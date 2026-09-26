@@ -211,14 +211,25 @@ double cylinder_inertia_torque_nm(double theta_deg, double omega_rad_s,
   return f_inertia * dx_drad;
 }
 
+/* The exhaust stroke ends at the TDC halfway round the cycle; the intake
+ * stroke runs from there to IVC. */
+#define EXHAUST_END_DEG 360.0
+
+double cylinder_open_valve_target_kpa(double theta_deg, double map_kpa,
+                                      double exhaust_kpa) {
+  return crank_wrap720_deg(theta_deg) < EXHAUST_END_DEG ? exhaust_kpa : map_kpa;
+}
+
 double cylinder_pressure_dtheta(double theta_deg, double pressure_kpa,
                                 const EngineGeometry *geom,
                                 double effective_compression_ratio,
                                 double theta_start_deg, double q_total_j,
-                                double n, double map_kpa) {
+                                double n, double map_kpa, double exhaust_kpa) {
   if (!cylinder_valve_closed(theta_deg, geom)) {
     const double relax_deg = 5.0;
-    return (map_kpa - pressure_kpa) / relax_deg;
+    return (cylinder_open_valve_target_kpa(theta_deg, map_kpa, exhaust_kpa) -
+            pressure_kpa) /
+           relax_deg;
   }
 
   double v = cylinder_volume_m3(theta_deg, geom, effective_compression_ratio);

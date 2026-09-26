@@ -23,7 +23,8 @@ typedef struct {
   double ambient_pressure_kpa;
   double inertia_kg_m2;
   double map_tau_s;
-  double friction_coeff_nm_per_rad_s;
+  double fric_const_nm;         /* friction at any forward speed, N*m */
+  double fric_lin_nm_per_rad_s; /* friction growing with crank speed */
   const CylinderConfig *cylinders;
   int num_cylinders;
   const EngineGeometry *geom;
@@ -31,20 +32,44 @@ typedef struct {
   double intake_temp_c;
   double eff_cr[ENGINE_MAX_CYLINDERS];
   double v_ivc_m3[ENGINE_MAX_CYLINDERS];
-  double phase_offset_deg[ENGINE_MAX_CYLINDERS]; /* cylinder's cycle lag behind
-                                                    the crank, from firing_order */
+  double
+      phase_offset_deg[ENGINE_MAX_CYLINDERS]; /* cylinder's cycle lag behind
+                                                 the crank, from firing_order */
   int cranking;
   double starter_torque_nm;
   int ignition_on;
 } EngineDerivParams;
 
-static double map_target_kpa(double throttle, double ambient_pressure_kpa) {
-  const double idle_vacuum_drop_kpa = 71.3; /* below ambient, closed throttle */
+/* Friction as `const + lin * omega`: the FMEP model turned into torque
+ * (T = Vd_total * FMEP / 4pi, FMEP = a + b * mean piston speed, and mean piston
+ * speed = stroke * omega / pi) plus the size-independent viscous term. */
+static void friction_terms(const EngineConfig *cfg, double *fric_const_nm,
+                           double *fric_lin_nm_per_rad_s) {
+  const double vd_total_m3 =
+      cylinder_displacement_m3(&cfg->geom) * (double)cfg->num_cylinders;
+  const double torque_per_kpa = vd_total_m3 * 1000.0 / (4.0 * UNITS_PI);
+  *fric_const_nm = torque_per_kpa * cfg->friction_fmep_const_kpa;
+  *fric_lin_nm_per_rad_s = torque_per_kpa * cfg->friction_fmep_per_ms_kpa *
+                               cfg->geom.stroke_m / UNITS_PI +
+                           cfg->friction_coeff_nm_per_rad_s;
+}
 
-  double map_idle_kpa = ambient_pressure_kpa - idle_vacuum_drop_kpa;
-  if (map_idle_kpa < 0.0) {
-    map_idle_kpa = 0.0;
+double engine_friction_torque_nm(const EngineConfig *cfg, double omega_rad_s) {
+  if (omega_rad_s <= 0.0) {
+    return 0.0;
   }
+  double c, l;
+  friction_terms(cfg, &c, &l);
+  return c + l * omega_rad_s;
+}
+
+static double map_target_kpa(double throttle, double ambient_pressure_kpa) {
+  /* Closed-throttle MAP as a fixed fraction of ambient (30 kPa at sea level).
+   * A fixed vacuum drop below ambient went to zero at altitude, where a closed
+   * throttle then left the engine with no air at all and stalled it. */
+  const double idle_map_fraction = 0.2963;
+
+  double map_idle_kpa = ambient_pressure_kpa * idle_map_fraction;
   double map_wot_kpa = ambient_pressure_kpa;
 
   return map_idle_kpa + throttle * (map_wot_kpa - map_idle_kpa);
@@ -117,8 +142,12 @@ static void engine_derivative(const double *state, double *dstate, double t,
 
     double dp_dtheta;
     if (!closed) {
+      /* gas exchange: vent to exhaust pressure (ambient) on the exhaust
+       * stroke, to manifold pressure on the intake stroke */
       const double relax_deg = 5.0;
-      dp_dtheta = (map_kpa - pressure_kpa) / relax_deg;
+      double target_kpa = cylinder_open_valve_target_kpa(
+          theta_local, map_kpa, p->ambient_pressure_kpa);
+      dp_dtheta = (target_kpa - pressure_kpa) / relax_deg;
     } else {
       double lambda = cylinder_lambda(c);
       double misfire = p->ignition_on ? misfire_fraction(lambda) : 1.0;
@@ -130,11 +159,10 @@ static void engine_derivative(const double *state, double *dstate, double t,
       double q_total_j = cylinder_charge_energy_j_with_vivc(
           map_kpa, p->intake_temp_c, p->v_ivc_m3[i], p->geom,
           p->fuel_cfg->afr_stoich, lambda, misfire);
-      double dq_ddeg =
-          q_total_j *
-          wiebe_burn_rate_per_deg(theta_local, theta_start,
-                                  p->geom->delta_theta_burn_deg,
-                                  p->geom->wiebe_a, p->geom->wiebe_m);
+      double dq_ddeg = q_total_j * wiebe_burn_rate_per_deg(
+                                       theta_local, theta_start,
+                                       p->geom->delta_theta_burn_deg,
+                                       p->geom->wiebe_a, p->geom->wiebe_m);
 
       double p_pa = kpa_to_pa(pressure_kpa);
       double dp_ddeg_pa = -ENGINE_POLYTROPIC_N * (p_pa / vd.v_m3) * vd.dv_ddeg +
@@ -148,7 +176,8 @@ static void engine_derivative(const double *state, double *dstate, double t,
     torque_total += p->starter_torque_nm;
   }
 
-  double torque_friction = p->friction_coeff_nm_per_rad_s * omega;
+  double torque_friction =
+      omega > 0.0 ? p->fric_const_nm + p->fric_lin_nm_per_rad_s * omega : 0.0;
   double torque_net = torque_total - torque_friction - p->load_torque_nm;
 
   dstate[ENGINE_STATE_OMEGA] = torque_net / p->inertia_kg_m2;
@@ -162,7 +191,14 @@ EngineConfig engine_config_default(void) {
   EngineConfig cfg;
   cfg.inertia_kg_m2 = 0.6;
   cfg.map_tau_s = 0.25;
-  cfg.friction_coeff_nm_per_rad_s = 0.12;
+  cfg.friction_coeff_nm_per_rad_s = 0.02;
+  cfg.friction_fmep_const_kpa = 40.0;
+  cfg.friction_fmep_per_ms_kpa = 14.0;
+
+  cfg.idle_target_rpm = 800.0;
+  cfg.idle_kp = 0.0003;
+  cfg.idle_ki = 0.0003;
+  cfg.idle_max_throttle = 0.15;
 
   /* Inline-four, 1-3-4-2 firing order */
   cfg.num_cylinders = 4;
@@ -192,6 +228,8 @@ void engine_model_init(EngineState *state, const EngineConfig *config) {
   state->torque_nm = 0.0;
   state->run_state = ENGINE_RUNNING;
   state->ignition_on = 1;
+  state->governor_throttle = 0.0;
+  state->idle_integral = 0.0;
   state->trace = NULL;
 }
 
@@ -209,6 +247,8 @@ void engine_model_start(EngineState *state, const EngineConfig *config,
   state->torque_nm = 0.0;
   state->run_state = ENGINE_CRANKING;
   state->ignition_on = 1;
+  state->governor_throttle = 0.0;
+  state->idle_integral = 0.0;
   if (state->trace) {
     engine_trace_clear(state->trace); /* crank angle just jumped back to 0 */
   }
@@ -227,6 +267,34 @@ void engine_model_stop(EngineState *state) {
   /* Already ENGINE_STOPPED: no-op. */
 }
 
+/* The idle governor: a PI loop on crank speed that returns the throttle to add
+ * this frame. It only acts on a running engine with ignition on, and hands
+ * control back to the pilot once their throttle reaches its authority; in that
+ * case the integrator is held (not reset), so a throttle chop finds the idle
+ * throttle it had already found. Anti-windup: the integrator stays within
+ * [0, idle_max_throttle]. */
+static double idle_governor_throttle(EngineState *state,
+                                     const EngineConfig *cfg,
+                                     double pilot_throttle, double dt) {
+  const double u_max = cfg->idle_max_throttle;
+  if (cfg->idle_target_rpm <= 0.0 || u_max <= 0.0 ||
+      state->run_state != ENGINE_RUNNING || !state->ignition_on) {
+    state->idle_integral = 0.0;
+    return 0.0;
+  }
+  const double error_rpm = cfg->idle_target_rpm - engine_model_rpm(state);
+  if (pilot_throttle < u_max) {
+    state->idle_integral += cfg->idle_ki * error_rpm * dt;
+    if (state->idle_integral < 0.0) {
+      state->idle_integral = 0.0;
+    } else if (state->idle_integral > u_max) {
+      state->idle_integral = u_max;
+    }
+  }
+  double u = cfg->idle_kp * error_rpm + state->idle_integral;
+  return u < 0.0 ? 0.0 : (u > u_max ? u_max : u);
+}
+
 #define ENGINE_SUB_STEP_DEG 1.0
 #define ENGINE_SUB_STEP_MAX_S 0.0005
 
@@ -237,6 +305,9 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
                        double t, double dt) {
   if (state->run_state == ENGINE_STOPPED) {
     state->torque_nm = 0.0;
+    /* nothing is pumping the manifold any more: it equalises with ambient, so
+     * a restart doesn't begin from the vacuum the stalled engine left behind */
+    state->map_kpa = input->ambient_pressure_kpa;
     return;
   }
   int was_cranking = (state->run_state == ENGINE_CRANKING);
@@ -252,13 +323,18 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
     vec[ENGINE_STATE_PRESSURE_BASE + i] = cyl_states[i].cyl_pressure_kpa;
   }
 
+  state->governor_throttle =
+      idle_governor_throttle(state, config, input->throttle, dt);
+
   EngineDerivParams params;
-  params.throttle = input->throttle;
+  params.throttle = input->throttle > state->governor_throttle
+                        ? input->throttle
+                        : state->governor_throttle;
   params.load_torque_nm = input->load_torque_nm;
   params.ambient_pressure_kpa = input->ambient_pressure_kpa;
   params.inertia_kg_m2 = config->inertia_kg_m2;
   params.map_tau_s = config->map_tau_s;
-  params.friction_coeff_nm_per_rad_s = config->friction_coeff_nm_per_rad_s;
+  friction_terms(config, &params.fric_const_nm, &params.fric_lin_nm_per_rad_s);
   params.cylinders = cylinders;
   params.num_cylinders = n_cyl;
   params.geom = &config->geom;
@@ -350,7 +426,7 @@ double engine_model_torque_nm(const EngineState *state) {
 }
 
 int engine_config_check(const EngineConfig *cfg,
-                       char msgs[][ENGINE_CONFIG_ISSUE_LEN], int max_msgs) {
+                        char msgs[][ENGINE_CONFIG_ISSUE_LEN], int max_msgs) {
   int issues = 0;
 #define ISSUE(...)                                                             \
   do {                                                                         \
@@ -415,7 +491,8 @@ int engine_config_validate(const EngineConfig *cfg, FILE *out) {
   char msgs[ENGINE_CONFIG_MAX_ISSUES][ENGINE_CONFIG_ISSUE_LEN];
   const int n = engine_config_check(cfg, msgs, ENGINE_CONFIG_MAX_ISSUES);
   if (out) {
-    const int shown = n < ENGINE_CONFIG_MAX_ISSUES ? n : ENGINE_CONFIG_MAX_ISSUES;
+    const int shown =
+        n < ENGINE_CONFIG_MAX_ISSUES ? n : ENGINE_CONFIG_MAX_ISSUES;
     for (int i = 0; i < shown; i++) {
       fprintf(out, "%s\n", msgs[i]);
     }
@@ -437,13 +514,13 @@ EngineDerived engine_config_derived(const EngineConfig *cfg) {
   d.bore_stroke_ratio = g->stroke_m > 0.0 ? g->bore_m / g->stroke_m : 0.0;
   d.rod_ratio = g->stroke_m > 0.0 ? g->conrod_len_m / g->stroke_m : 0.0;
   d.piston_speed_3000rpm_ms = 2.0 * g->stroke_m * 3000.0 / 60.0;
+  d.friction_1000rpm_nm = engine_friction_torque_nm(cfg, rpm_to_rad_s(1000.0));
 
   const double sea_level_density = 1.225; /* kg/m^3, ISA */
   const double sea_level_sound_ms = 340.3;
   PropState ps;
   prop_step(&ps, &cfg->prop, PROP_REF_RPM, 0.0, sea_level_density);
-  d.prop_tip_speed_ms =
-      UNITS_PI * cfg->prop.diameter_m * (PROP_REF_RPM / 60.0);
+  d.prop_tip_speed_ms = UNITS_PI * cfg->prop.diameter_m * (PROP_REF_RPM / 60.0);
   d.prop_tip_mach = d.prop_tip_speed_ms / sea_level_sound_ms;
   d.prop_static_torque_nm = ps.torque_nm;
   d.prop_static_thrust_n = ps.thrust_n;
@@ -452,11 +529,11 @@ EngineDerived engine_config_derived(const EngineConfig *cfg) {
 
 void engine_cylinder_phase_offsets(const EngineConfig *cfg,
                                    double out[ENGINE_MAX_CYLINDERS]) {
-  const int n = cfg->num_cylinders < 0
-                    ? 0
-                    : (cfg->num_cylinders > ENGINE_MAX_CYLINDERS
-                           ? ENGINE_MAX_CYLINDERS
-                           : cfg->num_cylinders);
+  const int n =
+      cfg->num_cylinders < 0
+          ? 0
+          : (cfg->num_cylinders > ENGINE_MAX_CYLINDERS ? ENGINE_MAX_CYLINDERS
+                                                       : cfg->num_cylinders);
 
   int seen[ENGINE_MAX_CYLINDERS + 1] = {0};
   int valid = 1;
@@ -494,11 +571,10 @@ void engine_default_firing_order(int num_cylinders,
       {0, 0, 0, 0, 0, 0}, {1, 0, 0, 0, 0, 0}, {1, 2, 0, 0, 0, 0},
       {1, 3, 2, 0, 0, 0}, {1, 3, 4, 2, 0, 0}, {1, 2, 4, 5, 3, 0},
       {1, 5, 3, 6, 2, 4}};
-  const int n = num_cylinders < 0
-                    ? 0
-                    : (num_cylinders > ENGINE_MAX_CYLINDERS
-                           ? ENGINE_MAX_CYLINDERS
-                           : num_cylinders);
+  const int n = num_cylinders < 0 ? 0
+                                  : (num_cylinders > ENGINE_MAX_CYLINDERS
+                                         ? ENGINE_MAX_CYLINDERS
+                                         : num_cylinders);
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     out[i] = ORDERS[n][i];
   }

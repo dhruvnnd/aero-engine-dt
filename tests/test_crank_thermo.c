@@ -185,26 +185,49 @@ static void test_pressure_derivative_open_vs_closed(void) {
   double eff_cr = g.compression_ratio;
   double map_kpa = 80.0;
 
+  const double exhaust_kpa = 101.3;
+
   /* Open period (intake stroke): pressure below MAP should show a positive
    * derivative pulling it up toward MAP. */
   double dp_open = cylinder_pressure_dtheta(450.0, 40.0, &g, eff_cr, 700.0,
-                                            0.0, 1.3, map_kpa);
+                                            0.0, 1.3, map_kpa, exhaust_kpa);
   CHECK(dp_open > 0.0);
 
   /* Closed period, well before ignition (pure compression, q_total=0):
    * pressure should be rising (piston moving up, volume shrinking). */
-  double dp_compress = cylinder_pressure_dtheta(600.0, map_kpa, &g, eff_cr,
-                                                700.0, 0.0, 1.3, map_kpa);
+  double dp_compress = cylinder_pressure_dtheta(
+      600.0, map_kpa, &g, eff_cr, 700.0, 0.0, 1.3, map_kpa, exhaust_kpa);
   CHECK(dp_compress > 0.0);
 
   /* Adding heat release at the same point should make the pressure rise
    * faster than compression alone. */
-  double dp_with_heat = cylinder_pressure_dtheta(705.0, map_kpa * 3.0, &g,
-                                                 eff_cr, 700.0, 1500.0, 1.3,
-                                                 map_kpa);
+  double dp_with_heat = cylinder_pressure_dtheta(
+      705.0, map_kpa * 3.0, &g, eff_cr, 700.0, 1500.0, 1.3, map_kpa,
+      exhaust_kpa);
   double dp_without_heat = cylinder_pressure_dtheta(
-      705.0, map_kpa * 3.0, &g, eff_cr, 700.0, 0.0, 1.3, map_kpa);
+      705.0, map_kpa * 3.0, &g, eff_cr, 700.0, 0.0, 1.3, map_kpa, exhaust_kpa);
   CHECK(dp_with_heat > dp_without_heat);
+}
+
+/* Gas exchange: the exhaust stroke vents toward exhaust pressure, the intake
+ * stroke toward manifold pressure -- the two halves of the pumping loop. */
+static void test_open_valve_target_splits_exhaust_and_intake(void) {
+  CHECK_NEAR(cylinder_open_valve_target_kpa(200.0, 30.0, 101.3), 101.3, 1e-12);
+  CHECK_NEAR(cylinder_open_valve_target_kpa(359.0, 30.0, 101.3), 101.3, 1e-12);
+  CHECK_NEAR(cylinder_open_valve_target_kpa(361.0, 30.0, 101.3), 30.0, 1e-12);
+  CHECK_NEAR(cylinder_open_valve_target_kpa(500.0, 30.0, 101.3), 30.0, 1e-12);
+  CHECK_NEAR(cylinder_open_valve_target_kpa(-220.0, 30.0, 101.3), 30.0,
+             1e-12); /* wraps: -220 = 500 */
+
+  EngineGeometry g = engine_geometry_default();
+  /* the same low pressure is pulled UP on the exhaust stroke and stays put on
+   * the intake stroke when it already sits at MAP */
+  double dp_exh = cylinder_pressure_dtheta(250.0, 30.0, &g, g.compression_ratio,
+                                           700.0, 0.0, 1.3, 30.0, 101.3);
+  double dp_int = cylinder_pressure_dtheta(450.0, 30.0, &g, g.compression_ratio,
+                                           700.0, 0.0, 1.3, 30.0, 101.3);
+  CHECK(dp_exh > 0.0);
+  CHECK_NEAR(dp_int, 0.0, 1e-12);
 }
 
 /* cylinder_volume_and_deriv() / cylinder_kinematics() are a performance fast
@@ -275,6 +298,8 @@ static const TestCase CASES[] = {
      test_charge_energy_scales_with_map_and_zeroed_by_misfire},
     {"crank_thermo.pressure_derivative_open_vs_closed",
      test_pressure_derivative_open_vs_closed},
+    {"crank_thermo.open_valve_target_splits_exhaust_and_intake",
+     test_open_valve_target_splits_exhaust_and_intake},
     {"crank_thermo.combined_kinematics_match_individual_functions",
      test_combined_kinematics_match_individual_functions},
     {"crank_thermo.charge_energy_with_vivc_matches_original",

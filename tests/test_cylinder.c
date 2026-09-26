@@ -73,7 +73,7 @@ static void test_model_wiring_populates_cylinders(void) {
 static void run(ModelSync *sync, ModelState *st, double seconds) {
   EngineInput in;
   in.throttle = 0.85;
-  in.load_torque_nm = 40.0;
+  in.load_torque_nm = 0.0; /* the propeller (model_sync_step) is the load */
   in.ambient_pressure_kpa = 101.325;
   EnvInput env = {0.0, 0.0, 0.0}; /* sea level, still air */
   int steps = (int)(seconds / 0.01 + 0.5);
@@ -174,7 +174,7 @@ static void test_dead_cylinder_drops_rpm(void) {
    * Average torque_nm over a trailing window instead, so the comparison
    * reflects the converged behavior rather than oscillation phase. */
   EngineInput in = {
-      .throttle = 0.85, .load_torque_nm = 40.0, .ambient_pressure_kpa = 101.325};
+      .throttle = 0.85, .load_torque_nm = 0.0, .ambient_pressure_kpa = 101.325};
   EnvInput env = {0.0, 0.0, 0.0};
   double hs_torque_sum = 0.0, fs_torque_sum = 0.0;
   const int trailing_steps = 500; /* 5 s at dt=0.01 */

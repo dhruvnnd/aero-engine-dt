@@ -69,12 +69,17 @@ double cylinder_gas_torque_nm(double theta_deg, double pressure_kpa,
 double cylinder_inertia_torque_nm(double theta_deg, double omega_rad_s,
                                   const EngineGeometry *geom);
 
-/* In-cylinder pressure derivative dP/d(theta_deg), kPa/deg */
+/* Pressure the cylinder is vented to while its valves are open */
+double cylinder_open_valve_target_kpa(double theta_deg, double map_kpa,
+                                      double exhaust_kpa);
+
+/* In-cylinder pressure derivative dP/d(theta_deg), kPa/deg. While the valves
+ * are open it relaxes toward cylinder_open_valve_target_kpa(). */
 double cylinder_pressure_dtheta(double theta_deg, double pressure_kpa,
                                 const EngineGeometry *geom,
                                 double effective_compression_ratio,
                                 double theta_start_deg, double q_total_j,
-                                double n, double map_kpa);
+                                double n, double map_kpa, double exhaust_kpa);
 
 /* this exists purely to cut redundant sin/cos/sqrt calls in the sub-stepped
  * integration loop */

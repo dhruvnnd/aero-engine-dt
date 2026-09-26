@@ -41,11 +41,15 @@ typedef struct {
   EngineRunState run_state;
   int ignition_on;
 
+  /* Idle governor */
+  double governor_throttle;
+  double idle_integral;
+
   EngineTrace *trace;
 } EngineState;
 
 typedef struct {
-  double throttle;             /* 0.0 (closed) .. 1.0 (wide open) */
+  double throttle;       /* 0.0 (closed) .. 1.0 (wide open) */
   double load_torque_nm; /* external load on top of the propeller (accessories,
                             a dyno), N*m; model_sync_step() adds the prop's own
                             torque to this */
@@ -53,9 +57,18 @@ typedef struct {
 } EngineInput;
 
 typedef struct {
-  double inertia_kg_m2;               /* effective rotating inertia */
-  double map_tau_s;                   /* manifold filling time constant, s */
-  double friction_coeff_nm_per_rad_s; /* simple viscous friction coefficient */
+  double inertia_kg_m2; /* effective rotating inertia */
+  double map_tau_s;     /* manifold filling time constant, s */
+  double friction_coeff_nm_per_rad_s;
+  double friction_fmep_const_kpa;
+  double friction_fmep_per_ms_kpa;
+
+  /* Idle governor: an ECU-style closed loop that holds idle_target_rpm by
+   * adding throttle while the engine runs */
+  double idle_target_rpm;
+  double idle_kp;           /* throttle per rpm of error */
+  double idle_ki;           /* throttle per rpm of error per second */
+  double idle_max_throttle; /* governor authority, 0..1 of throttle */
 
   /* Engine geometry. num_cylinders is the active count (<=
    * ENGINE_MAX_CYLINDERS); firing_order lists 1-based cylinder numbers in the
@@ -98,6 +111,9 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
  * last engine_model_step() call (real per-cylinder physics, reflecting
  * whatever faults are set on `cylinders`), not a re-derived lumped curve. */
 double engine_model_rpm(const EngineState *state);
+
+/* Total friction torque at crank speed omega_rad_s (0 at or below rest) */
+double engine_friction_torque_nm(const EngineConfig *cfg, double omega_rad_s);
 double engine_model_torque_nm(const EngineState *state);
 
 /* Checks *cfg for physically-implausible values
@@ -124,6 +140,7 @@ typedef struct {
   double bore_stroke_ratio;
   double rod_ratio;               /* conrod length / stroke */
   double piston_speed_3000rpm_ms; /* mean piston speed */
+  double friction_1000rpm_nm;     /* total friction torque at 1000 rpm */
 
   /* sea-level ISA, still air, at PROP_REF_RPM */
   double prop_tip_speed_ms;

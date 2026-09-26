@@ -8,12 +8,13 @@ const ConfigGroup ENGINE_CONFIG_GROUPS[] = {
     {"Dynamics", 0},
     {"Geometry", 0},
     {"Propeller", 0},
+    {"Idle governor", 0},
     {"Combustion", 1},
 };
 const int ENGINE_CONFIG_GROUP_COUNT =
     (int)(sizeof ENGINE_CONFIG_GROUPS / sizeof ENGINE_CONFIG_GROUPS[0]);
 
-enum { G_DYN = 0, G_GEOM = 1, G_PROP = 2, G_COMB = 3 };
+enum { G_DYN = 0, G_GEOM = 1, G_PROP = 2, G_IDLE = 3, G_COMB = 4 };
 
 #define POS_EXCL (0.0), (INFINITY), CFG_MIN_EXCL /* strictly positive */
 #define NON_NEG (0.0), (INFINITY), 0             /* zero allowed */
@@ -34,11 +35,23 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      0.1, 0.4, 0.02, 1.0, "%.3f", 1.0, "s",
      "Manifold filling time constant -- how fast MAP chases its\n"
      "throttle target. Typical range: 0.1 - 0.4."},
-    {"friction_coeff_nm_per_rad_s", "friction", "N*m/(rad/s)", G_DYN,
-     OFF(friction_coeff_nm_per_rad_s), POS_EXCL, 0.05, 0.2, 0.005, 0.5, "%.3f",
-     1.0, "N*m/(rad/s)",
-     "Simple viscous friction coefficient, N*m per rad/s of crank\n"
-     "speed. Typical range: 0.05 - 0.2."},
+    {"friction_coeff_nm_per_rad_s", "viscous friction", "N*m/(rad/s)", G_DYN,
+     OFF(friction_coeff_nm_per_rad_s), POS_EXCL, 0.005, 0.05, 0.001, 0.5,
+     "%.4f", 1.0, "N*m/(rad/s)",
+     "Size-independent viscous drag (shaft seals, accessories), N*m per\n"
+     "rad/s of crank speed. The bulk of the friction is the FMEP model\n"
+     "below, which scales with displacement. Typical range: 0.005 - 0.05."},
+    {"friction_fmep_const_kpa", "friction, constant part", "kPa", G_DYN,
+     OFF(friction_fmep_const_kpa), NON_NEG, 30.0, 80.0, 0.0, 200.0, "%.1f",
+     1.0, "kPa",
+     "Speed-independent friction mean effective pressure (rings, valve\n"
+     "train, bearings). Friction torque = displacement / 4pi * FMEP, so it\n"
+     "grows with engine size. Typical range: 30 - 80."},
+    {"friction_fmep_per_ms_kpa", "friction, speed part", "kPa per m/s", G_DYN,
+     OFF(friction_fmep_per_ms_kpa), NON_NEG, 8.0, 20.0, 0.0, 40.0, "%.2f",
+     1.0, "kPa per m/s",
+     "Friction mean effective pressure added per m/s of mean piston speed\n"
+     "(2 * stroke * rpm / 60). Typical range: 8 - 20."},
     {"starter_torque_nm", "starter torque", "N*m", G_DYN,
      OFF(starter_torque_nm), POS_EXCL, NO_TYP, 5.0, 100.0, "%.1f", 1.0, "N*m",
      "Starter motor torque while cranking."},
@@ -103,6 +116,28 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      "Fraction of the static torque lost by the time J reaches the\n"
      "zero-thrust advance ratio (airspeed unloads the blades).\n"
      "Typical range: 0.3 - 0.6; must be in [0, 1]."},
+
+    /* ---- idle governor ---- */
+    {"idle_target_rpm", "idle target speed", "rpm", G_IDLE,
+     OFF(idle_target_rpm), NON_NEG, 600.0, 1400.0, 0.0, 2000.0, "%.0f", 1.0,
+     "rpm",
+     "Crank speed the idle governor holds by adding throttle while the\n"
+     "engine runs. 0 disables the governor. Typical range for a direct-drive\n"
+     "aircraft engine: 600 - 1400."},
+    {"idle_kp", "governor proportional gain", "throttle/rpm", G_IDLE,
+     OFF(idle_kp), NON_NEG, 0.0001, 0.001, 0.0, 0.003, "%.5f", 1.0,
+     "throttle/rpm",
+     "Throttle added per rpm of speed error. Too high makes idle hunt.\n"
+     "Typical range: 0.0001 - 0.001."},
+    {"idle_ki", "governor integral gain", "throttle/rpm/s", G_IDLE,
+     OFF(idle_ki), NON_NEG, 0.0001, 0.001, 0.0, 0.003, "%.5f", 1.0,
+     "throttle/rpm/s",
+     "Throttle added per rpm of error per second; removes the steady-state\n"
+     "error left by the proportional term. Typical range: 0.0001 - 0.001."},
+    {"idle_max_throttle", "governor authority", "", G_IDLE,
+     OFF(idle_max_throttle), 0.0, 1.0, 0, 0.1, 0.25, 0.0, 0.5, "%.3f", 1.0, "",
+     "Most throttle the governor may add, and the pilot throttle above which\n"
+     "it steps aside. Typical range: 0.1 - 0.25; must be in [0, 1]."},
 
     /* ---- combustion model tuning ---- */
     {"wiebe_a", "Wiebe a", "", G_COMB, OFF(geom.wiebe_a), POS_EXCL, 3.0, 6.0,

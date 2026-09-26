@@ -354,11 +354,15 @@ static void test_engine_stalls_instead_of_reversing(void) {
   CHECK_NEAR(st.omega_rad_s, omega_before, 1e-12); /* still ~0 right away */
 
   /* Under a sane operating point (not the absurd stalling load), cranking
-   * should climb speed and catch on its own within a few seconds. */
-  EngineInput normal_in = make_input(0.7, 20.0, 101.325);
+   * should climb speed and catch on its own within a few seconds. The flat
+   * load is kept small: unlike a propeller it doesn't vanish at rest, and the
+   * starter must beat it plus breakaway friction to turn the crank at all. */
+  EngineInput normal_in = make_input(0.7, 10.0, 101.325);
   run(&st, cyl_states, &cfg, &normal_in, 3.0, 0.02);
   CHECK(st.run_state == ENGINE_RUNNING);
-  CHECK(engine_model_rpm(&st) > cfg.starter_catch_rpm);
+  /* the idle governor holds the target (= catch speed here), so "above the
+   * catch speed" is really "at it" */
+  CHECK(engine_model_rpm(&st) > 0.9 * cfg.starter_catch_rpm);
 
   /* And a second engine_model_start() call while already running is a
    * documented no-op (matches a real ignition switch). */
@@ -390,7 +394,9 @@ static void test_starter_alone_can_crank_engine_up(void) {
   run(&st, cyl_states, &cfg, &in, 3.0, 0.02);
 
   CHECK(st.run_state == ENGINE_RUNNING);
-  CHECK(engine_model_rpm(&st) > cfg.starter_catch_rpm);
+  /* the idle governor's target equals the catch speed by default, so it holds
+   * the engine there rather than above it */
+  CHECK(engine_model_rpm(&st) > 0.9 * cfg.starter_catch_rpm);
 }
 
 /* ---- Phase 2: firing order, phase offsets, torque ripple ---- */
@@ -713,6 +719,268 @@ static void test_start_clears_the_trace(void) {
   CHECK(engine_trace_count(&tr) == 0);
 }
 
+/* ---- gas exchange, friction and the idle governor ---- */
+
+/* Mean total crank torque over the newest cycle of a motored engine (ignition
+ * off, no load): what is left is compression/expansion asymmetry plus the
+ * pumping loop. */
+static double motored_mean_torque_nm(double throttle, double map0_kpa) {
+  EngineConfig cfg = engine_config_default();
+  cfg.idle_target_rpm = 0.0;
+  static EngineTrace tr;
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  st.trace = &tr;
+  st.ignition_on = 0;
+  st.omega_rad_s = rpm_to_rad_s(1800.0);
+  st.map_kpa = map0_kpa;
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  EngineInput in = make_input(throttle, 0.0, 101.325);
+  run(&st, cs, &cfg, &in, 0.3, 0.02);
+  int first;
+  int n = newest_cycle(&tr, &first);
+  double sum = 0.0;
+  for (int i = 0; i < n; i++) {
+    sum += engine_trace_at(&tr, first + i)->torque_nm;
+  }
+  return sum / n;
+}
+
+/* The pumping loop: with the throttle closed the piston pushes against
+ * ambient-pressure exhaust and pulls against ~30 kPa intake, so a motored
+ * engine is a net brake of about (ambient - MAP) * displacement / 4pi; wide
+ * open there is (almost) none. */
+static void test_closed_throttle_motoring_has_pumping_loss(void) {
+  EngineConfig cfg = engine_config_default();
+  EngineDerived d = engine_config_derived(&cfg);
+  double expected_nm = (101.325 - 30.0) * 1000.0 * d.total_displacement_l *
+                       1e-3 / (4.0 * UNITS_PI);
+
+  double closed = motored_mean_torque_nm(0.0, 30.0);
+  double wot = motored_mean_torque_nm(1.0, 101.325);
+  CHECK(closed < -0.6 * expected_nm);
+  CHECK(closed > -1.4 * expected_nm);
+  CHECK(fabs(wot) < 0.25 * expected_nm);
+}
+
+static EngineConfig friction_only_cfg(int cylinders, double fmep_const,
+                                      double fmep_speed, double viscous) {
+  EngineConfig cfg = engine_config_default();
+  cfg.num_cylinders = cylinders;
+  engine_default_firing_order(cylinders, cfg.firing_order);
+  cfg.friction_fmep_const_kpa = fmep_const;
+  cfg.friction_fmep_per_ms_kpa = fmep_speed;
+  cfg.friction_coeff_nm_per_rad_s = viscous;
+  return cfg;
+}
+
+static void test_friction_scales_with_displacement(void) {
+  const double w = rpm_to_rad_s(2000.0);
+  EngineConfig four = friction_only_cfg(4, 40.0, 14.0, 0.02);
+  EngineConfig six = friction_only_cfg(6, 40.0, 14.0, 0.02);
+  double viscous = 0.02 * w;
+  double f4 = engine_friction_torque_nm(&four, w) - viscous;
+  double f6 = engine_friction_torque_nm(&six, w) - viscous;
+  CHECK_NEAR(f6 / f4, 1.5, 1e-9); /* the FMEP part follows displacement */
+
+  /* and equals displacement / 4pi * FMEP, FMEP = const + speed * piston speed */
+  double vd_m3 = cylinder_displacement_m3(&four.geom) * 4.0;
+  double c_m = 2.0 * four.geom.stroke_m * 2000.0 / 60.0;
+  double fmep_pa = (40.0 + 14.0 * c_m) * 1000.0;
+  CHECK_NEAR(f4, vd_m3 * fmep_pa / (4.0 * UNITS_PI), 1e-9);
+}
+
+static void test_friction_grows_with_speed_and_vanishes_at_rest(void) {
+  EngineConfig cfg = engine_config_default();
+  CHECK_NEAR(engine_friction_torque_nm(&cfg, 0.0), 0.0, 1e-12);
+  CHECK_NEAR(engine_friction_torque_nm(&cfg, -50.0), 0.0, 1e-12);
+  double lo = engine_friction_torque_nm(&cfg, rpm_to_rad_s(500.0));
+  double mid = engine_friction_torque_nm(&cfg, rpm_to_rad_s(1500.0));
+  double hi = engine_friction_torque_nm(&cfg, rpm_to_rad_s(3000.0));
+  CHECK(lo > 0.0 && mid > lo && hi > mid);
+  /* a constant part: friction at very low speed is still well above zero */
+  CHECK(engine_friction_torque_nm(&cfg, rpm_to_rad_s(50.0)) > 3.0);
+}
+
+static EngineConfig idle_cfg(double target_rpm) {
+  EngineConfig cfg = engine_config_default();
+  cfg.idle_target_rpm = target_rpm;
+  return cfg;
+}
+
+/* Settled closed-throttle engine (no prop at this level, so a small flat load
+ * stands in for it). Returns the state after `seconds`. */
+static EngineState idle_run(const EngineConfig *cfg, double load_nm,
+                            double seconds) {
+  EngineState st;
+  engine_model_init(&st, cfg);
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  EngineInput in = make_input(0.0, load_nm, 101.325);
+  run(&st, cs, cfg, &in, seconds, 0.02);
+  return st;
+}
+
+static void test_idle_governor_holds_the_target(void) {
+  for (double target = 700.0; target <= 1100.0; target += 200.0) {
+    EngineConfig cfg = idle_cfg(target);
+    EngineState st = idle_run(&cfg, 4.0, 40.0);
+    CHECK(st.run_state == ENGINE_RUNNING);
+    CHECK_NEAR(engine_model_rpm(&st), target, 20.0);
+    CHECK(st.governor_throttle > 0.0);
+    CHECK(st.governor_throttle < cfg.idle_max_throttle);
+  }
+}
+
+static void test_idle_governor_off_or_pointless_adds_nothing(void) {
+  EngineConfig off = idle_cfg(0.0);
+  EngineState a = idle_run(&off, 1.0, 40.0);
+  CHECK_NEAR(a.governor_throttle, 0.0, 1e-12);
+  CHECK(a.run_state == ENGINE_RUNNING);
+
+  /* a target below where the engine idles by itself: the governor can only
+   * add throttle, so it stays out of the way and the engine idles naturally */
+  EngineConfig low = idle_cfg(200.0);
+  EngineState b = idle_run(&low, 1.0, 40.0);
+  CHECK_NEAR(b.governor_throttle, 0.0, 1e-9);
+  CHECK_NEAR(engine_model_rpm(&b), engine_model_rpm(&a), 5.0);
+  CHECK(engine_model_rpm(&b) > 400.0);
+}
+
+/* With the governor a load step at idle is absorbed: the RPM returns to the
+ * target and the governor opens up to carry the extra load. */
+static void test_idle_governor_recovers_from_a_load_step(void) {
+  EngineConfig cfg = idle_cfg(800.0);
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  EngineInput light = make_input(0.0, 4.0, 101.325);
+  EngineInput heavy = make_input(0.0, 7.0, 101.325);
+  run(&st, cs, &cfg, &light, 30.0, 0.02);
+  CHECK_NEAR(engine_model_rpm(&st), 800.0, 20.0);
+  double gov_light = st.governor_throttle;
+
+  run(&st, cs, &cfg, &heavy, 30.0, 0.02);
+  CHECK(st.run_state == ENGINE_RUNNING);
+  CHECK_NEAR(engine_model_rpm(&st), 800.0, 25.0);
+  CHECK(st.governor_throttle > gov_light);
+}
+
+/* Authority is finite: an overload the governor can't carry leaves RPM below
+ * the target with the governor pinned at its limit -- and when the overload
+ * goes away the integrator hasn't wound up, so there is no big overshoot. */
+static void test_idle_governor_authority_limit_and_no_windup(void) {
+  EngineConfig cfg = idle_cfg(800.0);
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  EngineInput overload = make_input(0.0, 12.0, 101.325);
+  run(&st, cs, &cfg, &overload, 30.0, 0.02);
+  CHECK(st.run_state == ENGINE_RUNNING);
+  CHECK(engine_model_rpm(&st) < 750.0);
+  CHECK_NEAR(st.governor_throttle, cfg.idle_max_throttle, 1e-9);
+  CHECK(st.idle_integral <= cfg.idle_max_throttle + 1e-12);
+
+  EngineInput normal = make_input(0.0, 4.0, 101.325);
+  double peak = 0.0;
+  for (int i = 0; i < 1000; i++) { /* 20 s */
+    run(&st, cs, &cfg, &normal, 0.02, 0.02);
+    peak = fmax(peak, engine_model_rpm(&st));
+  }
+  CHECK(peak < 800.0 + 200.0);
+  CHECK_NEAR(engine_model_rpm(&st), 800.0, 25.0);
+}
+
+/* Above its authority the governor steps aside: the pilot's throttle is all
+ * that counts, so the engine behaves exactly as with no governor. */
+static void test_idle_governor_steps_aside_for_the_pilot(void) {
+  EngineConfig on = idle_cfg(800.0);
+  EngineConfig off = idle_cfg(0.0);
+  EngineState a, b;
+  engine_model_init(&a, &on);
+  engine_model_init(&b, &off);
+  CylinderState ca[ENGINE_MAX_CYLINDERS], cb[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(ca);
+  init_cyl_states(cb);
+  EngineInput in = make_input(0.6, 8.0, 101.325);
+  run(&a, ca, &on, &in, 20.0, 0.02);
+  run(&b, cb, &off, &in, 20.0, 0.02);
+  CHECK_NEAR(a.omega_rad_s, b.omega_rad_s, 1e-6);
+  CHECK_NEAR(a.map_kpa, b.map_kpa, 1e-6);
+}
+
+/* The chop from cruise: closing the throttle from 0.8 must not stall the
+ * engine, and it settles at the governed idle. */
+static void test_idle_governor_survives_a_throttle_chop(void) {
+  EngineConfig cfg = idle_cfg(800.0);
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  EngineInput cruise = make_input(0.8, 6.0, 101.325);
+  EngineInput chop = make_input(0.0, 6.0, 101.325);
+  run(&st, cs, &cfg, &cruise, 20.0, 0.02);
+  CHECK(engine_model_rpm(&st) > 1500.0);
+  double lowest = 1e9;
+  for (int i = 0; i < 1500; i++) { /* 30 s at closed throttle */
+    run(&st, cs, &cfg, &chop, 0.02, 0.02);
+    lowest = fmin(lowest, engine_model_rpm(&st));
+    CHECK(st.run_state == ENGINE_RUNNING);
+  }
+  CHECK(lowest > 400.0);
+  CHECK_NEAR(engine_model_rpm(&st), 800.0, 25.0);
+}
+
+/* The governor belongs to a running engine: nothing with the ignition off or
+ * while cranking. */
+static void test_idle_governor_only_acts_on_a_running_engine(void) {
+  EngineConfig cfg = idle_cfg(800.0);
+  EngineState st = idle_run(&cfg, 4.0, 20.0);
+  CHECK(st.governor_throttle > 0.0);
+
+  engine_model_stop(&st); /* ignition off, still spinning down */
+  CylinderState cs[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cs);
+  EngineInput in = make_input(0.0, 4.0, 101.325);
+  run(&st, cs, &cfg, &in, 0.1, 0.02);
+  CHECK_NEAR(st.governor_throttle, 0.0, 1e-12);
+  CHECK_NEAR(st.idle_integral, 0.0, 1e-12);
+
+  st.run_state = ENGINE_STOPPED;
+  st.omega_rad_s = 0.0;
+  engine_model_start(&st, &cfg, cs);
+  CHECK(st.run_state == ENGINE_CRANKING);
+  CHECK_NEAR(st.governor_throttle, 0.0, 1e-12);
+  CHECK_NEAR(st.idle_integral, 0.0, 1e-12);
+}
+
+/* Closed-throttle MAP follows ambient: a fixed vacuum drop went to zero at
+ * altitude and starved the engine. */
+static void test_closed_throttle_map_scales_with_ambient(void) {
+  EngineConfig cfg = idle_cfg(0.0);
+  double ratio_sl = 0.0, ratio_alt = 0.0;
+  for (int k = 0; k < 2; k++) {
+    double amb = k == 0 ? 101.325 : 70.1; /* ~3000 m */
+    EngineState st;
+    engine_model_init(&st, &cfg);
+    CylinderState cs[ENGINE_MAX_CYLINDERS];
+    init_cyl_states(cs);
+    EngineInput in = make_input(0.0, 2.0, amb);
+    st.map_kpa = amb;
+    run(&st, cs, &cfg, &in, 3.0, 0.02);
+    if (k == 0) {
+      ratio_sl = st.map_kpa / amb;
+    } else {
+      ratio_alt = st.map_kpa / amb;
+    }
+  }
+  CHECK_NEAR(ratio_sl, 0.2963, 0.01);
+  CHECK_NEAR(ratio_alt, ratio_sl, 0.005);
+}
+
 static const TestCase CASES[] = {
     {"engine_model.init_is_cold_idle", test_init_is_cold_idle},
     {"engine_model.config_defaults_are_positive",
@@ -758,6 +1026,28 @@ static const TestCase CASES[] = {
     {"engine_model.trace_total_matches_reported_mean_torque",
      test_trace_total_matches_reported_mean_torque},
     {"engine_model.start_clears_the_trace", test_start_clears_the_trace},
+    {"engine_model.closed_throttle_motoring_has_pumping_loss",
+     test_closed_throttle_motoring_has_pumping_loss},
+    {"engine_model.friction_scales_with_displacement",
+     test_friction_scales_with_displacement},
+    {"engine_model.friction_grows_with_speed_and_vanishes_at_rest",
+     test_friction_grows_with_speed_and_vanishes_at_rest},
+    {"engine_model.idle_governor_holds_the_target",
+     test_idle_governor_holds_the_target},
+    {"engine_model.idle_governor_off_or_pointless_adds_nothing",
+     test_idle_governor_off_or_pointless_adds_nothing},
+    {"engine_model.idle_governor_recovers_from_a_load_step",
+     test_idle_governor_recovers_from_a_load_step},
+    {"engine_model.idle_governor_authority_limit_and_no_windup",
+     test_idle_governor_authority_limit_and_no_windup},
+    {"engine_model.idle_governor_steps_aside_for_the_pilot",
+     test_idle_governor_steps_aside_for_the_pilot},
+    {"engine_model.idle_governor_survives_a_throttle_chop",
+     test_idle_governor_survives_a_throttle_chop},
+    {"engine_model.idle_governor_only_acts_on_a_running_engine",
+     test_idle_governor_only_acts_on_a_running_engine},
+    {"engine_model.closed_throttle_map_scales_with_ambient",
+     test_closed_throttle_map_scales_with_ambient},
 };
 
 RUN_TESTS(CASES)

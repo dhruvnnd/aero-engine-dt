@@ -136,6 +136,47 @@ static void test_spec_without_prop_keys_gets_the_default_prop(void) {
   remove(TMP_PATH);
 }
 
+/* Friction (FMEP) and idle-governor fields live in the same spec file. */
+static void test_friction_and_idle_fields_round_trip(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.friction_fmep_const_kpa = 55.0;
+  cfg.friction_fmep_per_ms_kpa = 11.5;
+  cfg.friction_coeff_nm_per_rad_s = 0.031;
+  cfg.idle_target_rpm = 950.0;
+  cfg.idle_kp = 0.0005;
+  cfg.idle_ki = 0.0004;
+  cfg.idle_max_throttle = 0.2;
+
+  CHECK(engine_spec_save(TMP_PATH, &cfg) == 0);
+
+  EngineConfig loaded;
+  EngineSpecResult r = engine_spec_load(TMP_PATH, &loaded);
+  CHECK(r.status == ENGINE_SPEC_OK);
+  CHECK(r.unknown_keys == 0);
+  CHECK_NEAR(loaded.friction_fmep_const_kpa, 55.0, 1e-9);
+  CHECK_NEAR(loaded.friction_fmep_per_ms_kpa, 11.5, 1e-9);
+  CHECK_NEAR(loaded.friction_coeff_nm_per_rad_s, 0.031, 1e-9);
+  CHECK_NEAR(loaded.idle_target_rpm, 950.0, 1e-9);
+  CHECK_NEAR(loaded.idle_kp, 0.0005, 1e-9);
+  CHECK_NEAR(loaded.idle_ki, 0.0004, 1e-9);
+  CHECK_NEAR(loaded.idle_max_throttle, 0.2, 1e-9);
+
+  remove(TMP_PATH);
+}
+
+static void test_validate_idle_and_friction_values(void) {
+  EngineConfig cfg = engine_config_default();
+  cfg.idle_target_rpm = 0.0; /* governor off is allowed */
+  cfg.friction_fmep_const_kpa = 0.0;
+  CHECK(engine_config_validate(&cfg, NULL) == 0);
+
+  cfg = engine_config_default();
+  cfg.idle_max_throttle = 1.5;
+  cfg.idle_kp = -0.1;
+  cfg.friction_fmep_per_ms_kpa = -1.0;
+  CHECK(engine_config_validate(&cfg, NULL) >= 3);
+}
+
 static void test_validate_flags_bad_prop_values(void) {
   EngineConfig cfg = engine_config_default();
   cfg.prop.diameter_m = 0.0;
@@ -250,6 +291,10 @@ static const TestCase CASES[] = {
      test_spec_without_prop_keys_gets_the_default_prop},
     {"engine_spec_io.validate_flags_bad_prop_values",
      test_validate_flags_bad_prop_values},
+    {"engine_spec_io.friction_and_idle_fields_round_trip",
+     test_friction_and_idle_fields_round_trip},
+    {"engine_spec_io.validate_idle_and_friction_values",
+     test_validate_idle_and_friction_values},
     {"engine_spec_io.missing_keys_fall_back_to_default",
      test_missing_keys_fall_back_to_default},
     {"engine_spec_io.open_failure_falls_back_to_default",

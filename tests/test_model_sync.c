@@ -236,6 +236,94 @@ static void test_stopped_engine_has_no_prop_load(void) {
   CHECK_NEAR(st.rpm, 0.0, 1e-9);
 }
 
+/* ---- idle behaviour with the real propeller ---- */
+
+/* Closed throttle, still air, with the given governor target (0 = off);
+ * optionally cold-started from stopped. */
+static ModelState idle_state(int ncyl, double target_rpm, double alt_m,
+                             int from_stopped) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  sync.engine_config.num_cylinders = ncyl;
+  engine_default_firing_order(ncyl, sync.engine_config.firing_order);
+  sync.engine_config.idle_target_rpm = target_rpm;
+  model_sync_apply_engine_config(&sync, &sync.engine_config);
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  if (from_stopped) {
+    st.engine.run_state = ENGINE_STOPPED;
+    st.engine.omega_rad_s = 0.0;
+    st.engine.map_kpa = environment_isa(alt_m).pressure_kpa; /* not pumping */
+    engine_model_start(&st.engine, &sync.engine_config, st.cyl);
+  }
+  EngineInput in = make_input(0.0, 0.0, environment_isa(alt_m).pressure_kpa);
+  EnvInput env = {alt_m, 0.0, 0.0};
+  for (int i = 0; i < 1500; i++) { /* 30 s */
+    model_sync_step(&sync, &st, &in, &env, 0.02);
+  }
+  return st;
+}
+
+/* The high-idle bug: with no pumping loss and friction that ignored engine
+ * size, every added cylinder pushed the closed-throttle idle up ~500 rpm
+ * (6 cyl ~2150 rpm). Now the ungoverned idle is low and nearly independent of
+ * cylinder count, and the governor lifts it to the target. */
+static void test_idle_no_longer_runs_away_with_cylinder_count(void) {
+  for (int n = 3; n <= 6; n++) {
+    ModelState natural = idle_state(n, 0.0, 0.0, 0);
+    CHECK(natural.engine.run_state == ENGINE_RUNNING);
+    CHECK(natural.rpm > 350.0);
+    CHECK(natural.rpm < 750.0);
+
+    ModelState governed = idle_state(n, 800.0, 0.0, 0);
+    CHECK(governed.engine.run_state == ENGINE_RUNNING);
+    CHECK_NEAR(governed.rpm, 800.0, 25.0);
+    CHECK(governed.engine.governor_throttle < 0.15);
+  }
+}
+
+static void test_idle_governor_holds_from_a_cold_start(void) {
+  for (int n = 4; n <= 6; n += 2) {
+    ModelState st = idle_state(n, 800.0, 0.0, 1);
+    CHECK(st.engine.run_state == ENGINE_RUNNING);
+    CHECK_NEAR(st.rpm, 800.0, 25.0);
+  }
+}
+
+/* Stall it for real (an absurd load), let it sit stopped, then restart with a
+ * closed throttle: the manifold has equalised with ambient while stopped, so
+ * the restart catches and settles at the governed idle. */
+static void test_restart_after_a_stall_at_closed_throttle(void) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  EnvInput env = {0.0, 0.0, 0.0};
+  EngineInput crushing = make_input(0.0, 500.0, 101.325);
+  for (int i = 0; i < 500; i++) {
+    model_sync_step(&sync, &st, &crushing, &env, 0.02);
+  }
+  CHECK(st.engine.run_state == ENGINE_STOPPED);
+  CHECK_NEAR(st.engine.map_kpa, 101.325, 1e-9);
+
+  engine_model_start(&st.engine, &sync.engine_config, st.cyl);
+  EngineInput normal = make_input(0.0, 0.0, 101.325);
+  for (int i = 0; i < 1500; i++) {
+    model_sync_step(&sync, &st, &normal, &env, 0.02);
+  }
+  CHECK(st.engine.run_state == ENGINE_RUNNING);
+  CHECK_NEAR(st.rpm, 800.0, 25.0);
+}
+
+/* A closed throttle at altitude (a UAV descending from cruise) must not
+ * stall the engine: closed-throttle MAP scales with ambient pressure. */
+static void test_idle_holds_at_altitude(void) {
+  ModelState st = idle_state(4, 800.0, 3000.0, 0);
+  CHECK(st.engine.run_state == ENGINE_RUNNING);
+  CHECK_NEAR(st.rpm, 800.0, 30.0);
+  CHECK(st.engine.map_kpa > 15.0);
+}
+
 static const TestCase CASES[] = {
     {"model_sync.init_bundles_cold_start", test_init_bundles_cold_start},
     {"model_sync.sim_clock_advances_by_dt", test_sim_clock_advances_by_dt},
@@ -255,6 +343,13 @@ static const TestCase CASES[] = {
     {"model_sync.extra_load_adds_to_the_prop", test_extra_load_adds_to_the_prop},
     {"model_sync.stopped_engine_has_no_prop_load",
      test_stopped_engine_has_no_prop_load},
+    {"model_sync.idle_no_longer_runs_away_with_cylinder_count",
+     test_idle_no_longer_runs_away_with_cylinder_count},
+    {"model_sync.idle_governor_holds_from_a_cold_start",
+     test_idle_governor_holds_from_a_cold_start},
+    {"model_sync.restart_after_a_stall_at_closed_throttle",
+     test_restart_after_a_stall_at_closed_throttle},
+    {"model_sync.idle_holds_at_altitude", test_idle_holds_at_altitude},
 };
 
 RUN_TESTS(CASES)

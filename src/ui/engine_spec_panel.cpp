@@ -122,6 +122,7 @@ void engine_spec_panel_draw(bool *open, const ModelSync *sync,
     row("bore / stroke", d.bore_stroke_ratio, "");
     row("rod ratio", d.rod_ratio, "");
     row("piston speed @ 3000 rpm", d.piston_speed_3000rpm_ms, "m/s");
+    row("friction torque @ 1000 rpm", d.friction_1000rpm_nm, "N*m");
     row("prop tip speed @ 2500 rpm", d.prop_tip_speed_ms, "m/s");
     row("prop tip Mach @ 2500 rpm", d.prop_tip_mach, "");
     row("prop static torque @ 2500", d.prop_static_torque_nm, "N*m");
