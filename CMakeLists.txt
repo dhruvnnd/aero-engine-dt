@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(aero_engine_dt C CXX)
+project(aero_engine_dt VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -158,6 +158,7 @@ list(APPEND APP_SOURCES "${CMAKE_SOURCE_DIR}/src/main.cpp")
 add_executable(aero_engine_dt ${APP_SOURCES})
 
 target_include_directories(aero_engine_dt PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(aero_engine_dt PRIVATE AERO_VERSION="${PROJECT_VERSION}")
 target_link_libraries(aero_engine_dt PRIVATE engine_core imgui implot SDL3::SDL3)
 
 target_compile_options(aero_engine_dt PRIVATE

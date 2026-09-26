@@ -1,5 +1,5 @@
 param (
-    [string]$Version = "dev",
+    [string]$Version = "",   # default: project VERSION from CMakeLists.txt
     [switch]$SkipBuild
 )
 
@@ -12,7 +12,15 @@ param (
 $ErrorActionPreference = "Stop"
 $RepoRoot   = $PSScriptRoot
 $BuildDir   = Join-Path $RepoRoot "build-release"
-$StageName  = "aero_engine_dt-$Version-win64"
+if (-not $Version) {
+    $m = Select-String -Path (Join-Path $RepoRoot "CMakeLists.txt") `
+        -Pattern 'project\(\s*aero_engine_dt\s+VERSION\s+([0-9][0-9A-Za-z.\-]*)' |
+        Select-Object -First 1
+    if (-not $m) { throw "No -Version given and no project VERSION found in CMakeLists.txt" }
+    $Version = $m.Matches[0].Groups[1].Value
+}
+$Version    = $Version.TrimStart('v')   # accept "v0.2.0" or "0.2.0"; the name adds the v
+$StageName  = "aero_engine_dt-v$Version-win64"
 $DistDir    = Join-Path $RepoRoot "dist"
 $StageDir   = Join-Path $DistDir $StageName
 $ZipPath    = Join-Path $DistDir "$StageName.zip"
@@ -55,24 +63,48 @@ aero engine digital twin -- v$Version
 
 Run it:
   Double-click aero_engine_dt.exe (or run it from a terminal).
+  The Layout menu switches between window layouts (Overview, Trends,
+  Systems, Input & Log, Configuration); View shows or hides any panel.
+  Pick Layout > Overview if panels look scattered. Your arrangement is
+  saved to aero_engine_dt_imgui.ini in the folder you launch from.
 
-Controls:
-  Throttle/altitude/airspeed via keyboard or a connected gamepad.
-  M           toggle raw model / noisy sensor feed
-  G           show/hide the gamepad panel
-  F           toggle fullscreen
+Controls (most are also on the Controls panel):
+  UP/DN or W/S   throttle           PGUP/PGDN   altitude
+  [ ]            airspeed           - =         OAT offset
+  R              reset flight condition
+  I / O          start / stop engine
+  P / .          pause / single-step the simulation
+  M              raw model / noisy sensor feed
+  SPACE          acknowledge alarms (or click MASTER WARNING / CAUTION)
+  G / L          gamepad panel / event log
+  F              fullscreen
+  A button on a connected gamepad also acknowledges alarms.
 
-Custom engine config:
+Simulation panels: Instruments, Cylinders, Environment, Trends, Cylinder
+Trends, Event Log, Alarms, Sim (clock and speed), Controls, Fault Injection.
+
+Recording:
+  File > Start recording logs the session to runs\dashboard.db (created
+  next to where you launch the app). aero-sync.exe can upload it.
+
+Engine configs:
+  File > Load engine spec... loads a spec file and restarts the simulation.
+  The Engine Spec panel shows the running engine; the Spec Editor creates,
+  edits, validates and saves specs. From a terminal:
   aero_engine_dt.exe --engine-spec configs\default.cfg
-  (edit or copy that file, or use twin_config.exe to scaffold/validate one)
+  twin_config.exe --new my_engine.cfg / --check my_engine.cfg
 
 Headless tools (optional, run from a terminal):
   twin_sim.exe --list
   twin_sim.exe --profile cruise-climb --db runs\cc.db
 
 Sync tool (optional, uploads logged runs to a server):
-  aero-sync.exe -db runs\twin_sim.db -dry-run
-  aero-sync.exe -db runs\twin_sim.db -server https://your-server
+  aero-sync.exe -db runs\dashboard.db -dry-run
+  aero-sync.exe -db runs\dashboard.db -server https://your-server
+
+Known limitations:
+  The load is a fixed placeholder (8 N*m), so RPM can pass the warning limit
+  in normal running, and engines other than the default are not calibrated.
 
 Requirements: Windows 10 or later, 64-bit. Nothing else to install --
 SDL3.dll must stay next to aero_engine_dt.exe. aero-sync.exe needs

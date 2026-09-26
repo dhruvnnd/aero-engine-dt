@@ -1,8 +1,14 @@
 #include "platform/sdl/sdl_window.h"
 
+/* Set from the project VERSION in CMakeLists.txt. */
+#ifndef AERO_VERSION
+#define AERO_VERSION "dev"
+#endif
+
 bool sdl_window_init(SdlWindowContext *ctx, const char *title, int width,
                      int height) {
-  SDL_SetAppMetadata("Aero Engine DT", "0.1", "com.aeroenginedt.simulator");
+  SDL_SetAppMetadata("Aero Engine DT", AERO_VERSION,
+                     "com.aeroenginedt.simulator");
 
   if (!SDL_Init(SDL_INIT_VIDEO)) {
     SDL_Log("Couldn\'t initialize SDL: %s", SDL_GetError());
