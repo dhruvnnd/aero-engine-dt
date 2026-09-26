@@ -92,7 +92,7 @@ static void test_clogged_injector_cuts_fuel_and_leans_cylinder(void) {
   CHECK(cs.cyl[1].lambda > 1.25);      /* that cylinder runs lean */
   CHECK_NEAR(cs.cyl[1].misfire_rate, 0.0, 0.0); /* ...but not misfiring */
   CHECK_NEAR(cs.cyl[0].lambda, 1.0, 1e-9);      /* the others unaffected */
-  CHECK(cs.cyl[1].egt_c > cs.cyl[0].egt_c + 5.0); /* lean -> hotter exhaust */
+  CHECK(cs.cyl[1].egt_c < cs.cyl[0].egt_c - 5.0); /* less fuel burnt -> cooler */
 }
 
 static const TestCase CASES[] = {

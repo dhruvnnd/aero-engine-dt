@@ -139,9 +139,15 @@ void engine_spec_panel_draw(bool *open, const ModelSync *sync,
     row("CHT time constant", t.cht_tau_s, "s");
     row("EGT time constant", t.egt_tau_s, "s");
     row("oil time constant", t.oil_tau_s, "s");
-    row("CHT rise at rated load", t.cht_rise_rated_c, "degC");
-    row("EGT rise at rated load", t.egt_rise_rated_c, "degC");
-    row("oil gain", t.oil_gain_c_per_w, "degC/W");
+    row("head base heat (cylinder firing)", t.head_base_kw, "kW");
+    row("head share of combustion heat", t.head_heat_share, "");
+    row("head share of friction heat", t.friction_head_share, "");
+    row("head temp rise per kW", t.cht_k_per_kw, "K/kW");
+    row("exhaust port / blowdown rise", t.egt_port_factor, "");
+    row("exhaust port wall loss", t.egt_port_loss_w, "W");
+    row("oil base heat (engine firing)", t.oil_base_kw, "kW");
+    row("oil share of combustion heat", t.oil_heat_share, "");
+    row("oil temp rise per kW", t.oil_k_per_kw, "K/kW");
     ImGui::EndTable();
   }
 

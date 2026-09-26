@@ -1,6 +1,7 @@
 #include "telemetry/engine_faults.h"
 
 #include "model/sync.h"
+#include "physics/engine_trace.h"
 
 #include <string.h>
 

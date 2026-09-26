@@ -1,6 +1,5 @@
 #include "physics/cylinder.h"
 
-#include "physics/combustion.h"
 #include "physics/integrator.h"
 
 /* cooling_trim < 1 means the head sheds less heat -> hotter. */
@@ -15,22 +14,6 @@ double cylinder_lambda(const CylinderConfig *c) {
   return (1.0 / flow) * (1.0 + c->intake_leak_frac);
 }
 
-static double egt_trim_factor(const CylinderConfig *c) {
-  const double k_spark_per_deg = 0.004;
-  const double k_lean = 0.6;
-
-  double lean = cylinder_lambda(c) - 1.0;
-  if (lean < 0.0) {
-    lean = 0.0; /* rich mixtures are not modelled as hotter here */
-  }
-  if (lean > 1.0) {
-    lean = 1.0; /* very lean: burn slows/cools again -- cap the rise */
-  }
-
-  double f = 1.0 + k_spark_per_deg * c->spark_offset_deg + k_lean * lean;
-  return f > 0.0 ? f : 0.0;
-}
-
 /* Fraction of recent cycles that fail to fire, from the mixture strength. */
 double misfire_fraction(double lambda) {
   if (lambda < 0.55 || lambda > 1.55) {
@@ -40,47 +23,6 @@ double misfire_fraction(double lambda) {
     return 0.3; /* ragged edge */
   }
   return 0.0;
-}
-
-/* Share of nominal indicated work this cylinder still makes (1.0 = full).
- * Less fuel (when lean), lower compression, spark away from MBT, or a lean
- * intake leak each cut it; 1.0 at nominal trims. */
-static double torque_trim_factor(const CylinderConfig *c) {
-  double inj = c->injector_flow_trim > 0.05 ? c->injector_flow_trim : 0.05;
-  double fuel =
-      inj < 1.0 ? inj : 1.0; /* excess fuel past stoich doesn't burn */
-
-  double comp = c->compression_trim > 0.0 ? c->compression_trim : 0.0;
-
-  double spark = 1.0 - 0.0008 * c->spark_offset_deg * c->spark_offset_deg;
-  if (spark < 0.0) {
-    spark = 0.0;
-  }
-
-  double leak = 1.0 - 0.5 * c->intake_leak_frac;
-  if (leak < 0.0) {
-    leak = 0.0;
-  }
-
-  return fuel * comp * spark * leak;
-}
-
-double cylinder_torque_nm(const CylinderConfig *config, double map_kpa,
-                          double omega_rad_s, int num_cylinders) {
-  int n = num_cylinders > 0 ? num_cylinders : 1;
-  double share = combustion_indicated_torque_nm(map_kpa, omega_rad_s) / n;
-  double firing = 1.0 - misfire_fraction(cylinder_lambda(config));
-  return share * torque_trim_factor(config) * firing;
-}
-
-double cylinders_total_torque_nm(const CylinderConfig *cyl, int num_cylinders,
-                                 double map_kpa, double omega_rad_s) {
-  int n = num_cylinders > 0 ? num_cylinders : 1;
-  double sum = 0.0;
-  for (int i = 0; i < n; i++) {
-    sum += cylinder_torque_nm(&cyl[i], map_kpa, omega_rad_s, n);
-  }
-  return sum;
 }
 
 CylinderConfig cylinder_config_default(void) {
@@ -121,21 +63,28 @@ static void cyl_derivative(const double *s, double *ds, double t,
   ds[CN_EGT] = (p->egt_target_c - s[CN_EGT]) / p->egt_tau_s;
 }
 
-/* Integrates each cylinder's cht_c/egt_c first-order nodes off the shared
- * operating point + its trims
- * */
 void cylinder_step(CylinderState *state, const CylinderConfig *config,
-                   double map_kpa, double omega_rad_s, double ambient_c,
-                   const ThermalConfig *thermal_cfg, int num_cylinders,
+                   const CylinderThermalInput *in, double map_kpa,
+                   double ambient_c, const ThermalConfig *thermal_cfg,
                    double cool_index, double t, double dt) {
-  double load_frac = combustion_load_fraction(map_kpa, omega_rad_s);
-  double cht_rise = thermal_rise_c(thermal_cfg->cht_rise_rated_c, load_frac);
-  double egt_rise = thermal_rise_c(thermal_cfg->egt_rise_rated_c, load_frac);
-  double cool_div = thermal_cool_divisor(cool_index);
+  const double gas_cp_j_per_kgk = 1100.0;
+  const double head_heat_kw = (in->heat_w > 1.0 ? thermal_cfg->head_base_kw : 0.0) +
+                              (thermal_cfg->head_heat_share * in->heat_w +
+                               thermal_cfg->friction_head_share * in->friction_w) /
+                              1000.0;
+  const double blowdown_rise_c = in->blowdown_c - ambient_c;
 
   CylDerivParams p;
-  p.cht_target_c = ambient_c + cht_rise / cht_cool_factor(config) / cool_div;
-  p.egt_target_c = ambient_c + egt_rise * egt_trim_factor(config);
+  p.cht_target_c = ambient_c + head_heat_kw * thermal_cfg->cht_k_per_kw /
+                                   cht_cool_factor(config) /
+                                   thermal_cool_divisor(cool_index);
+  double egt_rise_c = thermal_cfg->egt_port_factor *
+                      (blowdown_rise_c > 0.0 ? blowdown_rise_c : 0.0);
+  if (in->gas_flow_kg_s > 1e-6) {
+    egt_rise_c -=
+        thermal_cfg->egt_port_loss_w / (in->gas_flow_kg_s * gas_cp_j_per_kgk);
+  }
+  p.egt_target_c = ambient_c + (egt_rise_c > 0.0 ? egt_rise_c : 0.0);
   p.cht_tau_s = thermal_cfg->cht_tau_s;
   p.egt_tau_s = thermal_cfg->egt_tau_s;
 
@@ -145,9 +94,8 @@ void cylinder_step(CylinderState *state, const CylinderConfig *config,
   state->egt_c = vec[CN_EGT];
 
   /* Algebraic outputs -- not integrated. ca50/fuel_pw are rough placeholders
-   * until a fuel path and displacement config land. */
-  int n = num_cylinders > 0 ? num_cylinders : 1;
-  state->imep_bar = 0.02 * cylinder_torque_nm(config, map_kpa, omega_rad_s, n);
+   * until a fuel path lands. */
+  state->imep_bar = in->imep_kpa / 100.0;
   state->lambda = cylinder_lambda(config);
   state->misfire_rate = misfire_fraction(state->lambda);
   state->ca50_deg =

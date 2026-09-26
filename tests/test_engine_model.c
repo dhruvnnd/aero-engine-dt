@@ -1,7 +1,6 @@
 #include "test_util.h"
 
 #include "math/units.h"
-#include "physics/combustion.h"
 #include "physics/cylinder.h"
 #include "physics/engine_model.h"
 #include "physics/engine_trace.h"
@@ -263,56 +262,73 @@ static void test_cylinder_pressure_stays_sane_and_peaks_above_map(void) {
   CHECK(peak_kpa > st.map_kpa * 3.0);
 }
 
-/* Phase 1's required validation gate: the new crank-angle model's mean
- * torque, at a swept range of throttle/RPM operating points, should be the
- * same order of magnitude as the old combustion_indicated_torque_nm() curve
- * it replaces -- they won't match exactly (the old curve was a guess), but
- * a factor-of-5+ difference would mean the new model's geometry/combustion
- * constants are producing an implausible engine, not just "a different
- * curve". See docs/physical_modeling_plan.md Phase 1, step 6. */
-static void test_mean_torque_same_order_of_magnitude_as_old_curve(void) {
+/* The heat, work and exhaust temperature the engine reports for the thermal
+ * nodes are the cycle's real numbers: every cylinder releases heat and makes
+ * net work, and the burnt gas leaves hot. */
+static void test_reports_heat_work_and_blowdown_per_cylinder(void) {
   EngineConfig cfg = engine_config_default();
-  double throttles[] = {0.3, 0.6, 1.0};
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  CylinderState cyl_states[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cyl_states);
+  EngineInput in = make_input(0.6, 20.0, 101.325);
+  run(&st, cyl_states, &cfg, &in, 6.0, 0.02);
 
-  for (size_t i = 0; i < sizeof(throttles) / sizeof(throttles[0]); i++) {
+  double heat_total = 0.0;
+  for (int i = 0; i < cfg.num_cylinders; i++) {
+    const CylinderThermalInput *c = &st.cyl_thermal[i];
+    CHECK(c->heat_w > 500.0);
+    CHECK(c->imep_kpa > 100.0);
+    CHECK(c->blowdown_c > 250.0 && c->blowdown_c < 1100.0);
+    CHECK(c->gas_flow_kg_s > 0.0);
+    heat_total += c->heat_w;
+  }
+  /* what the cylinders turn into shaft work cannot exceed the heat released:
+   * indicated power = mean torque * omega */
+  CHECK(heat_total > st.torque_nm * st.omega_rad_s);
+  CHECK(st.friction_w > 0.0);
+  CHECK_NEAR(st.friction_w,
+             engine_friction_torque_nm(&cfg, st.omega_rad_s) * st.omega_rad_s,
+             1e-6);
+}
+
+/* More throttle = more air and fuel per cycle = more heat. */
+static void test_heat_grows_with_throttle(void) {
+  EngineConfig cfg = engine_config_default();
+  double heat[2];
+  double throttles[2] = {0.3, 1.0};
+  for (int k = 0; k < 2; k++) {
     EngineState st;
     engine_model_init(&st, &cfg);
     CylinderState cyl_states[ENGINE_MAX_CYLINDERS];
     init_cyl_states(cyl_states);
-    EngineInput in = make_input(throttles[i], 20.0, 101.325);
-    run(&st, cyl_states, &cfg, &in, 4.0, 0.02); /* settle */
-
-    /* torque_nm is a mean over just the last engine_model_step() call's
-     * sub-steps -- at lower RPM a fixed frame dt covers a smaller slice of
-     * the 720 deg combustion cycle, so a single frame's sample can land in a
-     * net-negative portion of the cycle (inertia torque legitimately goes
-     * negative part of the time, even though it integrates to ~0 over a
-     * full cycle) purely by chance of phase. Average over a couple more
-     * seconds -- many frames spanning many full cycles -- to get the actual
-     * full-cycle mean this validation gate is about, rather than comparing
-     * one arbitrarily-phased instant. */
-    CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
-    for (int c = 0; c < ENGINE_MAX_CYLINDERS; c++) {
-      cyl[c] = cylinder_config_default();
+    EngineInput in = make_input(throttles[k], 20.0, 101.325);
+    run(&st, cyl_states, &cfg, &in, 6.0, 0.02);
+    heat[k] = 0.0;
+    for (int i = 0; i < cfg.num_cylinders; i++) {
+      heat[k] += st.cyl_thermal[i].heat_w;
     }
-    FuelConfig fuel_cfg = fuel_config_default();
-    double torque_sum = 0.0;
-    const int trailing_steps = 100; /* 2 s at dt=0.02 */
-    double t = 4.0;
-    for (int s = 0; s < trailing_steps; s++) {
-      engine_model_step(&st, &cfg, &in, &fuel_cfg, cyl, cyl_states,
-                        TEST_INTAKE_TEMP_C, t, 0.02);
-      t += 0.02;
-      torque_sum += st.torque_nm;
-    }
-    double new_model_nm = torque_sum / trailing_steps;
-
-    double old_curve_nm =
-        combustion_indicated_torque_nm(st.map_kpa, st.omega_rad_s);
-
-    CHECK(new_model_nm > old_curve_nm / 5.0);
-    CHECK(new_model_nm < old_curve_nm * 5.0);
   }
+  CHECK(heat[1] > 1.5 * heat[0]);
+}
+
+/* A stopped engine gives the thermal nodes nothing to heat with. */
+static void test_stopped_engine_reports_no_heat(void) {
+  EngineConfig cfg = engine_config_default();
+  EngineState st;
+  engine_model_init(&st, &cfg);
+  CylinderState cyl_states[ENGINE_MAX_CYLINDERS];
+  init_cyl_states(cyl_states);
+  EngineInput in = make_input(0.6, 20.0, 101.325);
+  run(&st, cyl_states, &cfg, &in, 3.0, 0.02);
+  st.run_state = ENGINE_STOPPED;
+  st.omega_rad_s = 0.0;
+  run(&st, cyl_states, &cfg, &in, 0.1, 0.02);
+  for (int i = 0; i < cfg.num_cylinders; i++) {
+    CHECK_NEAR(st.cyl_thermal[i].heat_w, 0.0, 1e-12);
+    CHECK_NEAR(st.cyl_thermal[i].blowdown_c, TEST_INTAKE_TEMP_C, 1e-9);
+  }
+  CHECK_NEAR(st.friction_w, 0.0, 1e-12);
 }
 
 /* Robustness fix: a fixed load exceeding available torque at low throttle
@@ -843,8 +859,11 @@ static const TestCase CASES[] = {
     {"engine_model.theta_advances_and_wraps", test_theta_advances_and_wraps},
     {"engine_model.cylinder_pressure_stays_sane_and_peaks_above_map",
      test_cylinder_pressure_stays_sane_and_peaks_above_map},
-    {"engine_model.mean_torque_same_order_of_magnitude_as_old_curve",
-     test_mean_torque_same_order_of_magnitude_as_old_curve},
+    {"engine_model.reports_heat_work_and_blowdown_per_cylinder",
+     test_reports_heat_work_and_blowdown_per_cylinder},
+    {"engine_model.heat_grows_with_throttle", test_heat_grows_with_throttle},
+    {"engine_model.stopped_engine_reports_no_heat",
+     test_stopped_engine_reports_no_heat},
     {"engine_model.engine_stalls_instead_of_reversing",
      test_engine_stalls_instead_of_reversing},
     {"engine_model.starter_alone_can_crank_engine_up",

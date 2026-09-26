@@ -42,6 +42,11 @@ typedef struct {
   EngineRunState run_state;
   int ignition_on;
 
+  /* Heat and work per cylinder over the last engine_model_step(), for the
+   * thermal nodes (physics/cylinder.h), and the engine's friction power. */
+  CylinderThermalInput cyl_thermal[ENGINE_MAX_CYLINDERS];
+  double friction_w;
+
   EngineTrace *trace;
 } EngineState;
 

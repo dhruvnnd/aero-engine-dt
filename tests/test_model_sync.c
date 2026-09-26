@@ -1,6 +1,5 @@
 #include "test_util.h"
 
-#include "physics/combustion.h"
 #include "physics/engine_model.h"
 #include "physics/environment.h"
 #include "physics/propeller.h"
@@ -82,7 +81,9 @@ static void test_throttle_up_spins_and_heats(void) {
   CHECK(st.thermal.oil_temp_c >= amb - 1e-6);       /* never below ambient */
 }
 
-static void test_cht_settles_near_load_scaled_target(void) {
+/* After the head has had time to settle, each cylinder's CHT sits at the heat
+ * balance its own numbers imply: ambient + head heat * K / cooling. */
+static void test_cht_settles_at_the_heat_balance(void) {
   ModelSync sync;
   model_sync_init(&sync);
   ModelState st;
@@ -90,35 +91,30 @@ static void test_cht_settles_near_load_scaled_target(void) {
   model_state_init(&st, &sync.engine_config, amb);
   EngineInput in = make_input(0.7, 35.0, 101.325);
   EnvInput env = env_at(amb); /* sea level, still air */
-  for (int i = 0; i < 110000; i++) { /* 1100 s -> well past CHT tau */
-    model_sync_step(&sync, &st, &in, &env, 0.01);
+  for (int i = 0; i < 20000; i++) { /* 400 s -> several CHT tau */
+    model_sync_step(&sync, &st, &in, &env, 0.02);
   }
-  /* Phase 1 (crank_thermo.h) has every cylinder firing in the same phase
-   * (true multi-cylinder staggering is Phase 2), so the crank-speed/MAP
-   * operating point settles into a small sustained oscillation rather than
-   * a perfect fixed point -- CHT itself is a slow enough filter that it
-   * settles smoothly regardless (its own tau averages the ripple out), but
-   * comparing it against a target built from a single instantaneous
-   * lf/cool_index sample can land anywhere in that ripple. Average lf and
-   * cool_index over a trailing window instead, matching what the slow CHT
-   * filter is actually converging toward. */
-  double lf_sum = 0.0, cool_sum = 0.0;
-  const int trailing_steps = 10000; /* last 100 s */
+  /* The heat inputs and cooling flow ripple a little with the firing pulses
+   * and crank speed; the slow head filter averages that out, so compare it
+   * with the balance built from window averages. */
+  double heat_sum = 0.0, fric_sum = 0.0, cool_sum = 0.0;
+  const int trailing_steps = 3000; /* last 60 s */
   for (int i = 0; i < trailing_steps; i++) {
-    model_sync_step(&sync, &st, &in, &env, 0.01);
-    lf_sum +=
-        combustion_load_fraction(st.engine.map_kpa, st.engine.omega_rad_s);
+    model_sync_step(&sync, &st, &in, &env, 0.02);
+    heat_sum += st.engine.cyl_thermal[0].heat_w;
+    fric_sum += st.engine.cyl_thermal[0].friction_w;
     cool_sum += environment_cool_index(st.env.density_kg_m3,
                                        st.env.airspeed_ms, st.rpm);
   }
-  double lf = lf_sum / trailing_steps;
-  double cool = cool_sum / trailing_steps;
-  /* Still air + thin-ish sea-level ram gives cool_index < 1, so the CHT
-   * target is the load-scaled rise divided by sqrt(cool_index). */
-  double target =
-      amb + thermal_rise_c(sync.thermal_config.cht_rise_rated_c, lf) /
-                thermal_cool_divisor(cool);
-  CHECK_NEAR(st.thermal.cht_c, target, 2.0);
+  const ThermalConfig *tc = &sync.thermal_config;
+  const double head_kw = tc->head_base_kw +
+                         (tc->head_heat_share * heat_sum / trailing_steps +
+                          tc->friction_head_share * fric_sum / trailing_steps) /
+                             1000.0;
+  const double target =
+      amb + head_kw * tc->cht_k_per_kw /
+                thermal_cool_divisor(cool_sum / trailing_steps);
+  CHECK_NEAR(st.cyl[0].cht_c, target, 4.0);
 }
 
 /* ---- propeller coupling (Phase 4) ---- */
@@ -330,8 +326,8 @@ static const TestCase CASES[] = {
     {"model_sync.derived_readouts_stay_in_sync",
      test_derived_readouts_stay_in_sync},
     {"model_sync.throttle_up_spins_and_heats", test_throttle_up_spins_and_heats},
-    {"model_sync.cht_settles_near_load_scaled_target",
-     test_cht_settles_near_load_scaled_target},
+    {"model_sync.cht_settles_at_the_heat_balance",
+     test_cht_settles_at_the_heat_balance},
     {"model_sync.prop_load_reaches_the_crank", test_prop_load_reaches_the_crank},
     {"model_sync.throttle_sweep_gives_monotonic_bounded_rpm",
      test_throttle_sweep_gives_monotonic_bounded_rpm},

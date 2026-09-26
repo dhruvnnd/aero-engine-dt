@@ -35,26 +35,26 @@ CylinderConfig cylinder_config_default(void);
  * output zero. */
 void cylinder_state_init(CylinderState *state, double ambient_temp_c);
 
+/* What the crank-angle model says one cylinder did over the last step,
+ * averaged over about two engine cycles; the cylinder's thermal nodes are
+ * driven from this. */
+typedef struct {
+  double heat_w;       /* mean heat released into the gas by combustion, W */
+  double imep_kpa;     /* net indicated mean effective pressure (incl. pumping) */
+  double friction_w;   /* this cylinder's share of the engine's friction power */
+  double gas_flow_kg_s; /* charge (air + fuel) passing through it, kg/s */
+  double blowdown_c;   /* gas temperature when the exhaust valve last opened */
+} CylinderThermalInput;
+
 /* Advances this cylinder's cht_c and egt_c nodes by dt and refreshes its
  * algebraic outputs (lambda, imep_bar, fuel_pw_ms, ca50_deg, misfire_rate).
- *  `cool_index` (from environment_cool_index) scales head cooling; EGT is
- * combustion-set and unaffected by it. */
+ * The head chases ambient + head heat * thermal_cfg->cht_k_per_kw / cooling;
+ * the exhaust port chases ambient + egt_port_factor * (blowdown - ambient).
+ * `cool_index` (from environment_cool_index) scales head cooling. */
 void cylinder_step(CylinderState *state, const CylinderConfig *config,
-                   double map_kpa, double omega_rad_s, double ambient_c,
-                   const ThermalConfig *thermal_cfg, int num_cylinders,
+                   const CylinderThermalInput *in, double map_kpa,
+                   double ambient_c, const ThermalConfig *thermal_cfg,
                    double cool_index, double t, double dt);
-
-/* This cylinder's contribution to engine indicated torque, N*m: an equal
- * 1/num_cylinders share of combustion_indicated_torque_nm(), scaled by the
- * cylinder's trims and zeroed while it is misfiring. A healthy cylinder
- * returns exactly the lumped value / num_cylinders. */
-double cylinder_torque_nm(const CylinderConfig *config, double map_kpa,
-                          double omega_rad_s, int num_cylinders);
-
-/* Sum of cylinder_torque_nm() over cyl[0 .. num_cylinders). With all
- * cylinders healthy this equals combustion_indicated_torque_nm(). */
-double cylinders_total_torque_nm(const CylinderConfig *cyl, int num_cylinders,
-                                 double map_kpa, double omega_rad_s);
 
 /* This cylinder's air/fuel equivalence ratio from its trims alone (>1.0 =
  * lean, from injector_flow_trim < 1.0 and/or intake_leak_frac > 0) */

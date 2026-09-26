@@ -76,24 +76,31 @@ static void run(ModelSync *sync, ModelState *st, double seconds) {
   in.load_torque_nm = 0.0; /* the propeller (model_sync_step) is the load */
   in.ambient_pressure_kpa = 101.325;
   EnvInput env = {0.0, 0.0, 0.0}; /* sea level, still air */
-  int steps = (int)(seconds / 0.01 + 0.5);
+  int steps = (int)(seconds / 0.02 + 0.5);
   for (int i = 0; i < steps; i++) {
-    model_sync_step(sync, st, &in, &env, 0.01);
+    model_sync_step(sync, st, &in, &env, 0.02);
   }
 }
 
-/* Nominal trims: every per-cylinder node must track the lumped thermal node
- * it was seeded from. */
-static void test_nominal_tracks_lumped(void) {
+/* Nominal trims: the cylinders run alike, and the engine-wide readings are the
+ * hottest head and the mean exhaust port over them. */
+static void test_nominal_cylinders_match_and_engine_readings_derive(void) {
   ModelSync sync;
   model_sync_init(&sync);
   ModelState st;
   model_state_init(&st, &sync.engine_config, 15.0);
-  run(&sync, &st, 60.0);
-  for (int i = 0; i < sync.engine_config.num_cylinders; i++) {
-    CHECK_NEAR(st.cyl[i].cht_c, st.thermal.cht_c, 1e-6);
-    CHECK_NEAR(st.cyl[i].egt_c, st.thermal.egt_c, 1e-6);
+  run(&sync, &st, 120.0);
+  double cht_max = 0.0, egt_sum = 0.0;
+  const int n = sync.engine_config.num_cylinders;
+  for (int i = 0; i < n; i++) {
+    CHECK_NEAR(st.cyl[i].cht_c, st.cyl[0].cht_c, 3.0);
+    CHECK_NEAR(st.cyl[i].egt_c, st.cyl[0].egt_c, 8.0);
+    cht_max = st.cyl[i].cht_c > cht_max ? st.cyl[i].cht_c : cht_max;
+    egt_sum += st.cyl[i].egt_c;
   }
+  CHECK_NEAR(st.thermal.cht_c, cht_max, 1e-9);
+  CHECK_NEAR(st.thermal.egt_c, egt_sum / n, 1e-9);
+  CHECK(st.thermal.egt_c > st.thermal.cht_c + 100.0);
 }
 
 static void test_cooling_trim_raises_cht(void) {
@@ -103,19 +110,57 @@ static void test_cooling_trim_raises_cht(void) {
   ModelState st;
   model_state_init(&st, &sync.engine_config, 15.0);
   run(&sync, &st, 120.0);
-  CHECK(st.cyl[1].cht_c > st.cyl[0].cht_c + 2.0);
-  CHECK_NEAR(st.cyl[0].cht_c, st.thermal.cht_c, 1e-6); /* others untouched */
-  CHECK_NEAR(st.cyl[2].cht_c, st.thermal.cht_c, 1e-6);
+  CHECK(st.cyl[1].cht_c > st.cyl[0].cht_c + 10.0);
+  CHECK_NEAR(st.cyl[2].cht_c, st.cyl[0].cht_c, 3.0); /* others untouched */
+  CHECK_NEAR(st.thermal.cht_c, st.cyl[1].cht_c, 1e-9); /* the hottest head */
 }
 
 static void test_spark_retard_raises_egt(void) {
   ModelSync sync;
   model_sync_init(&sync);
-  sync.cyl_config[2].spark_offset_deg = 15.0;
+  sync.cyl_config[2].spark_offset_deg = 25.0;
   ModelState st;
   model_state_init(&st, &sync.engine_config, 15.0);
   run(&sync, &st, 60.0);
-  CHECK(st.cyl[2].egt_c > st.cyl[0].egt_c + 10.0);
+  CHECK(st.cyl[2].egt_c > st.cyl[0].egt_c + 30.0);
+}
+
+/* Low compression lets the charge leave the cylinder hotter. */
+static void test_compression_loss_raises_egt(void) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  sync.cyl_config[2].compression_trim = 0.3;
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  run(&sync, &st, 60.0);
+  CHECK(st.cyl[2].egt_c > st.cyl[0].egt_c + 100.0);
+}
+
+/* A lean but still firing cylinder has less fuel to burn: cooler exhaust, and
+ * a dead one (past the flammability limit) reads about ambient. */
+static void test_lean_cylinder_runs_cooler_and_a_dead_one_cold(void) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  sync.cyl_config[1].injector_flow_trim = 0.8;
+  sync.cyl_config[3].injector_flow_trim = 0.3;
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  run(&sync, &st, 100.0);
+  CHECK(st.cyl[1].egt_c < st.cyl[0].egt_c - 20.0);
+  CHECK(st.cyl[3].egt_c < 40.0);
+  CHECK(st.cyl[3].cht_c < 60.0);
+}
+
+/* The cylinders' loading shows in imep: a cylinder that makes less shows less. */
+static void test_imep_reflects_cylinder_work(void) {
+  ModelSync sync;
+  model_sync_init(&sync);
+  sync.cyl_config[2].intake_leak_frac = 0.7; /* dead */
+  ModelState st;
+  model_state_init(&st, &sync.engine_config, 15.0);
+  run(&sync, &st, 30.0);
+  CHECK(st.cyl[0].imep_bar > 1.0);
+  CHECK(st.cyl[2].imep_bar < st.cyl[0].imep_bar - 1.0);
 }
 
 static void test_misfire_zero_at_nominal(void) {
@@ -231,9 +276,14 @@ static const TestCase CASES[] = {
     {"cylinder.engine_config_geometry", test_engine_config_geometry},
     {"cylinder.model_wiring_populates_cylinders",
      test_model_wiring_populates_cylinders},
-    {"cylinder.nominal_tracks_lumped", test_nominal_tracks_lumped},
+    {"cylinder.nominal_cylinders_match_and_engine_readings_derive",
+     test_nominal_cylinders_match_and_engine_readings_derive},
     {"cylinder.cooling_trim_raises_cht", test_cooling_trim_raises_cht},
     {"cylinder.spark_retard_raises_egt", test_spark_retard_raises_egt},
+    {"cylinder.compression_loss_raises_egt", test_compression_loss_raises_egt},
+    {"cylinder.lean_cylinder_runs_cooler_and_a_dead_one_cold",
+     test_lean_cylinder_runs_cooler_and_a_dead_one_cold},
+    {"cylinder.imep_reflects_cylinder_work", test_imep_reflects_cylinder_work},
     {"cylinder.misfire_zero_at_nominal", test_misfire_zero_at_nominal},
     {"cylinder.lean_leak_triggers_misfire", test_lean_leak_triggers_misfire},
     {"cylinder.nominal_torque_matches_lumped",

@@ -256,7 +256,9 @@ double cylinder_charge_energy_j_with_vivc(double map_kpa, double intake_temp_c,
   double t_k = celsius_to_kelvin(intake_temp_c);
   double m_air_kg = (p_pa * v_ivc_m3) / (r_air_j_per_kgk * t_k);
 
-  double lam = lambda > 0.1 ? lambda : 0.1;
+  /* Fuel past stoichiometric has no air to burn with: a rich cylinder makes no
+   * more heat than a stoichiometric one. */
+  double lam = lambda > 1.0 ? lambda : 1.0;
   double m_fuel_kg = m_air_kg / (afr_stoich * lam);
 
   double firing = 1.0 - misfire_frac;

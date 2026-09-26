@@ -2,7 +2,6 @@
 
 #include <string.h>
 
-#include "physics/combustion.h"
 #include "physics/cylinder.h"
 #include "physics/ecu.h"
 #include "physics/electrical.h"
@@ -85,26 +84,31 @@ void model_sync_step(ModelSync *sync, ModelState *state,
                     &sync->fuel_config, sync->cyl_config, state->cyl,
                     ambient_temp_c, sync->sim_time_s, dt);
 
-  /* Thermal drivers from the current (post-step) operating point: raw waste
-   * heat for the oil node, load fraction for the saturating CHT/EGT nodes */
-  double waste_heat_w =
-      combustion_waste_heat_w(state->engine.map_kpa, state->engine.omega_rad_s);
-  double load_frac = combustion_load_fraction(state->engine.map_kpa,
-                                              state->engine.omega_rad_s);
-
   double cool_index =
       environment_cool_index(state->env.density_kg_m3, state->env.airspeed_ms,
                              engine_model_rpm(&state->engine));
 
-  thermal_step(&state->thermal, &sync->thermal_config, waste_heat_w, load_frac,
-               cool_index, ambient_temp_c, sync->sim_time_s, dt);
-
-  for (int i = 0; i < sync->engine_config.num_cylinders; i++) {
-    cylinder_step(&state->cyl[i], &sync->cyl_config[i], state->engine.map_kpa,
-                  state->engine.omega_rad_s, ambient_temp_c,
-                  &sync->thermal_config, sync->engine_config.num_cylinders,
-                  cool_index, sync->sim_time_s, dt);
+  /* Each cylinder's head and exhaust port follow its own heat release and
+   * exhaust gas; the engine-wide readings are the hottest head and the mean
+   * port. Oil is heated by friction plus a share of the combustion heat. */
+  const int n_cyl = sync->engine_config.num_cylinders;
+  double heat_total_w = 0.0;
+  double cht_max = ambient_temp_c;
+  double egt_sum = 0.0;
+  for (int i = 0; i < n_cyl; i++) {
+    cylinder_step(&state->cyl[i], &sync->cyl_config[i],
+                  &state->engine.cyl_thermal[i], state->engine.map_kpa,
+                  ambient_temp_c, &sync->thermal_config, cool_index,
+                  sync->sim_time_s, dt);
+    heat_total_w += state->engine.cyl_thermal[i].heat_w;
+    cht_max = state->cyl[i].cht_c > cht_max ? state->cyl[i].cht_c : cht_max;
+    egt_sum += state->cyl[i].egt_c;
   }
+  state->thermal.cht_c = cht_max;
+  state->thermal.egt_c = n_cyl > 0 ? egt_sum / n_cyl : ambient_temp_c;
+  thermal_oil_step(&state->thermal, &sync->thermal_config,
+                   state->engine.friction_w, heat_total_w, cool_index,
+                   ambient_temp_c, sync->sim_time_s, dt);
 
   sync->sim_time_s += dt;
 
