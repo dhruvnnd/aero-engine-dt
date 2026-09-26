@@ -20,6 +20,7 @@ void ecu_init(EcuState *e) {
   e->idle_enabled = 1;
   e->idle_mode = ECU_IDLE_STANDBY;
   ecu_reset_idle(e);
+  e->rpm_seen = 0.0;
   e->idle_target_rpm = 0.0;
   e->pilot_throttle = 0.0;
   e->throttle_cmd = 0.0;
@@ -45,6 +46,7 @@ void ecu_step(EcuState *e, const EcuConfig *cfg, const EcuSensors *sensors,
   const double pilot_throttle = pilot->throttle;
   e->fitted = 1;
   e->pilot_throttle = pilot_throttle;
+  e->rpm_seen = rpm;
   e->idle_target_rpm = cfg->idle_target_rpm > 0.0 ? cfg->idle_target_rpm : 0.0;
 
   if (cfg->idle_target_rpm <= 0.0 || u_max <= 0.0) {
@@ -86,11 +88,64 @@ void ecu_step(EcuState *e, const EcuConfig *cfg, const EcuSensors *sensors,
 void ecu_bypass(EcuState *e, const EcuPilotCmd *pilot, EcuActuators *out) {
   e->fitted = 0;
   e->idle_mode = ECU_IDLE_DISABLED;
+  e->rpm_seen = 0.0;
   e->idle_target_rpm = 0.0;
   ecu_reset_idle(e);
   e->pilot_throttle = pilot->throttle;
   e->throttle_cmd = pilot->throttle;
   out->throttle = pilot->throttle;
+}
+
+void ecu_sensor_fault_set(EcuSensorFault *f, EcuFaultKind kind, double value) {
+  if (kind != f->kind) {
+    f->held_valid = 0;
+  }
+  f->kind = kind;
+  f->value = value;
+}
+
+double ecu_sensor_fault_apply(EcuSensorFault *f, double truth) {
+  double v = truth;
+  switch (f->kind) {
+  case ECU_FAULT_OFFSET:
+    v = truth + f->value;
+    break;
+  case ECU_FAULT_SCALE:
+    v = truth * f->value;
+    break;
+  case ECU_FAULT_STUCK:
+    if (!f->held_valid) {
+      f->held = truth;
+      f->held_valid = 1;
+    }
+    v = f->held;
+    break;
+  case ECU_FAULT_DROPOUT:
+    v = 0.0;
+    break;
+  case ECU_FAULT_NONE:
+  case ECU_FAULT_KIND_COUNT:
+    break;
+  }
+  return v < 0.0 ? 0.0 : v;
+}
+
+const char *ecu_fault_kind_name(EcuFaultKind kind) {
+  switch (kind) {
+  case ECU_FAULT_NONE:
+    return "none";
+  case ECU_FAULT_OFFSET:
+    return "offset";
+  case ECU_FAULT_SCALE:
+    return "scale";
+  case ECU_FAULT_STUCK:
+    return "stuck";
+  case ECU_FAULT_DROPOUT:
+    return "dropout";
+  case ECU_FAULT_KIND_COUNT:
+    break;
+  }
+  return "?";
 }
 
 const char *ecu_idle_mode_name(EcuIdleMode mode) {

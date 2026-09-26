@@ -236,6 +236,66 @@ static void test_bypass_passes_the_pilot_straight_through(void) {
   CHECK(e.idle_mode == ECU_IDLE_ACTIVE);
 }
 
+/* ---- sensor faults on the ECU's crank-speed input ---- */
+
+static void test_sensor_fault_kinds_change_what_is_read(void) {
+  EcuSensorFault f = {0};
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 800.0), 800.0, 0.0); /* none */
+
+  ecu_sensor_fault_set(&f, ECU_FAULT_OFFSET, 120.0);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 800.0), 920.0, 1e-12);
+  ecu_sensor_fault_set(&f, ECU_FAULT_OFFSET, -120.0);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 800.0), 680.0, 1e-12);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 50.0), 0.0, 0.0); /* never negative */
+
+  ecu_sensor_fault_set(&f, ECU_FAULT_SCALE, 0.9);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 1000.0), 900.0, 1e-12);
+
+  ecu_sensor_fault_set(&f, ECU_FAULT_DROPOUT, 0.0);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 1000.0), 0.0, 0.0);
+
+  ecu_sensor_fault_set(&f, ECU_FAULT_NONE, 0.0);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 1000.0), 1000.0, 0.0);
+}
+
+/* A stuck sensor latches the first value it sees; the latch restarts when the
+ * kind is set again but not when only the value moves. */
+static void test_stuck_sensor_holds_its_first_reading(void) {
+  EcuSensorFault f = {0};
+  ecu_sensor_fault_set(&f, ECU_FAULT_STUCK, 0.0);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 800.0), 800.0, 0.0); /* latches */
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 1500.0), 800.0, 0.0);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 200.0), 800.0, 0.0);
+
+  ecu_sensor_fault_set(&f, ECU_FAULT_STUCK, 5.0); /* value moved: same latch */
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 1200.0), 800.0, 0.0);
+
+  ecu_sensor_fault_set(&f, ECU_FAULT_NONE, 0.0);
+  ecu_sensor_fault_set(&f, ECU_FAULT_STUCK, 0.0); /* a new fault: new latch */
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 1200.0), 1200.0, 0.0);
+  CHECK_NEAR(ecu_sensor_fault_apply(&f, 900.0), 1200.0, 0.0);
+}
+
+static void test_fault_kind_names_exist_and_differ(void) {
+  for (int i = 0; i < (int)ECU_FAULT_KIND_COUNT; i++) {
+    const char *a = ecu_fault_kind_name((EcuFaultKind)i);
+    CHECK(a != NULL && a[0] != '\0' && a[0] != '?');
+    for (int j = i + 1; j < (int)ECU_FAULT_KIND_COUNT; j++) {
+      CHECK(a != ecu_fault_kind_name((EcuFaultKind)j));
+    }
+  }
+}
+
+/* The state records what the ECU read, not the truth. */
+static void test_state_records_the_reading_the_ecu_used(void) {
+  EcuState e;
+  ecu_init(&e);
+  CHECK_NEAR(e.rpm_seen, 0.0, 0.0);
+  EcuConfig c = cfg();
+  step(&e, &c, 733.0, 0.0, 0.1, 1, 1);
+  CHECK_NEAR(e.rpm_seen, 733.0, 0.0);
+}
+
 static void test_mode_names_exist_and_differ(void) {
   const EcuIdleMode modes[] = {ECU_IDLE_DISABLED, ECU_IDLE_OFF,
                                ECU_IDLE_STANDBY,  ECU_IDLE_PILOT,
@@ -270,6 +330,14 @@ static const TestCase CASES[] = {
      test_reset_idle_keeps_the_operator_switch},
     {"ecu.bypass_passes_the_pilot_straight_through",
      test_bypass_passes_the_pilot_straight_through},
+    {"ecu.sensor_fault_kinds_change_what_is_read",
+     test_sensor_fault_kinds_change_what_is_read},
+    {"ecu.stuck_sensor_holds_its_first_reading",
+     test_stuck_sensor_holds_its_first_reading},
+    {"ecu.fault_kind_names_exist_and_differ",
+     test_fault_kind_names_exist_and_differ},
+    {"ecu.state_records_the_reading_the_ecu_used",
+     test_state_records_the_reading_the_ecu_used},
     {"ecu.mode_names_exist_and_differ", test_mode_names_exist_and_differ},
 };
 

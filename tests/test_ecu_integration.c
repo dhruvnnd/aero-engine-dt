@@ -264,6 +264,88 @@ static void test_engine_starts_with_and_without_an_ecu(void) {
   }
 }
 
+/* ---- the ECU with a lying crank-speed sensor ---- */
+
+/* A governed idle, settled, ready to have a fault injected. */
+static ModelState settled_idle(ModelSync *s) {
+  ModelState st = make_state(s);
+  run(s, &st, 0.0, 4.0, 40.0);
+  return st;
+}
+
+/* Reads 0: the ECU sees a huge error and opens up to its authority, so the real
+ * engine runs well above idle. It doesn't stall, and it recovers when cleared. */
+static void test_dropout_makes_the_governor_flare(void) {
+  ModelSync s = make_sync(1, 800.0);
+  ModelState st = settled_idle(&s);
+  CHECK_NEAR(st.rpm, 800.0, 20.0);
+
+  ecu_sensor_fault_set(&s.ecu_rpm_fault, ECU_FAULT_DROPOUT, 0.0);
+  run(&s, &st, 0.0, 4.0, 30.0);
+  CHECK_NEAR(st.ecu.rpm_seen, 0.0, 0.0);
+  CHECK(st.rpm > 950.0); /* true speed is well above the target */
+  CHECK_NEAR(st.ecu.idle_throttle, 0.15, 1e-9);
+  CHECK(st.ecu.idle_mode == ECU_IDLE_LIMITED); /* the ECU thinks it's failing */
+  CHECK(st.engine.run_state == ENGINE_RUNNING);
+
+  ecu_sensor_fault_set(&s.ecu_rpm_fault, ECU_FAULT_NONE, 0.0);
+  run(&s, &st, 0.0, 4.0, 40.0);
+  CHECK_NEAR(st.rpm, 800.0, 25.0);
+  CHECK(st.ecu.idle_mode == ECU_IDLE_ACTIVE);
+}
+
+/* Reads high: the ECU holds the wrong speed, and the engine settles that far
+ * below the target. */
+static void test_offset_makes_the_governor_hold_the_wrong_speed(void) {
+  ModelSync s = make_sync(1, 800.0);
+  ModelState st = settled_idle(&s);
+  ecu_sensor_fault_set(&s.ecu_rpm_fault, ECU_FAULT_OFFSET, 100.0);
+  run(&s, &st, 0.0, 4.0, 40.0);
+  CHECK_NEAR(st.ecu.rpm_seen, 800.0, 25.0); /* what it thinks it holds */
+  CHECK_NEAR(st.rpm, 700.0, 30.0);          /* what the engine really does */
+  CHECK(st.rpm < st.ecu.rpm_seen);
+}
+
+static void test_scale_error_shifts_the_held_speed(void) {
+  ModelSync s = make_sync(1, 800.0);
+  ModelState st = settled_idle(&s);
+  ecu_sensor_fault_set(&s.ecu_rpm_fault, ECU_FAULT_SCALE, 0.9);
+  run(&s, &st, 0.0, 4.0, 40.0);
+  CHECK_NEAR(st.ecu.rpm_seen, 800.0, 25.0);
+  CHECK_NEAR(st.rpm, 800.0 / 0.9, 30.0);
+}
+
+/* A frozen reading: the ECU can't see a load step, so it doesn't respond to it
+ * and the real speed falls. */
+static void test_stuck_sensor_blinds_the_governor_to_a_load_step(void) {
+  ModelSync s = make_sync(1, 800.0);
+  ModelState st = settled_idle(&s);
+  const double throttle_before = st.ecu.idle_throttle;
+
+  ecu_sensor_fault_set(&s.ecu_rpm_fault, ECU_FAULT_STUCK, 0.0);
+  run(&s, &st, 0.0, 4.0, 5.0); /* latches the settled reading */
+  const double latched = st.ecu.rpm_seen;
+  run(&s, &st, 0.0, 7.0, 30.0); /* now a load step the ECU cannot see */
+  CHECK_NEAR(st.ecu.rpm_seen, latched, 0.0);
+  CHECK(st.rpm < 750.0); /* the speed fell... */
+  /* ...and the ECU never opened up to meet it (a frozen reading a few rpm above
+   * the target even trims the throttle down slowly) */
+  CHECK(st.ecu.idle_throttle <= throttle_before + 0.005);
+}
+
+/* The fault is in the ECU's input, not the engine: without an ECU it does
+ * nothing. */
+static void test_sensor_fault_does_nothing_without_an_ecu(void) {
+  ModelSync a = make_sync(0, 800.0);
+  ModelSync b = make_sync(0, 800.0);
+  ecu_sensor_fault_set(&b.ecu_rpm_fault, ECU_FAULT_DROPOUT, 0.0);
+  ModelState sa = make_state(&a);
+  ModelState sb = make_state(&b);
+  run(&a, &sa, 0.0, 1.0, 30.0);
+  run(&b, &sb, 0.0, 1.0, 30.0);
+  CHECK_NEAR(sa.engine.omega_rad_s, sb.engine.omega_rad_s, 0.0);
+}
+
 static const TestCase CASES[] = {
     {"ecu_integration.governor_holds_the_target",
      test_governor_holds_the_target},
@@ -291,6 +373,16 @@ static const TestCase CASES[] = {
      test_no_ecu_equals_an_ecu_that_does_nothing},
     {"ecu_integration.engine_starts_with_and_without_an_ecu",
      test_engine_starts_with_and_without_an_ecu},
+    {"ecu_integration.dropout_makes_the_governor_flare",
+     test_dropout_makes_the_governor_flare},
+    {"ecu_integration.offset_makes_the_governor_hold_the_wrong_speed",
+     test_offset_makes_the_governor_hold_the_wrong_speed},
+    {"ecu_integration.scale_error_shifts_the_held_speed",
+     test_scale_error_shifts_the_held_speed},
+    {"ecu_integration.stuck_sensor_blinds_the_governor_to_a_load_step",
+     test_stuck_sensor_blinds_the_governor_to_a_load_step},
+    {"ecu_integration.sensor_fault_does_nothing_without_an_ecu",
+     test_sensor_fault_does_nothing_without_an_ecu},
 };
 
 RUN_TESTS(CASES)

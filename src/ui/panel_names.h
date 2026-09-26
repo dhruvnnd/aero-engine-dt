@@ -17,6 +17,8 @@
 #define PANEL_TORQUE_TRACE "Torque Ripple"
 #define PANEL_ECU "ECU"
 #define PANEL_ECU_TRENDS "ECU Trends"
+#define PANEL_ECU_IO "ECU I/O"
+#define PANEL_ECU_COMPARE "ECU Compare"
 #define PANEL_EVENT_LOG "Event Log"
 #define PANEL_GAMEPAD "Gamepad / Input Map"
 

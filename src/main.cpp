@@ -23,6 +23,7 @@
 #include "platform/sdl/sdl_window.h"
 #include "telemetry/annunciator.h"
 #include "telemetry/cyl_trends.h"
+#include "telemetry/ecu_compare.h"
 #include "telemetry/ecu_trends.h"
 #include "telemetry/event_log.h"
 #include "telemetry/monitor.h"
@@ -31,6 +32,8 @@
 #include "ui/alarm_strip.h"
 #include "ui/controls_panel.h"
 #include "ui/cyl_trends_panel.h"
+#include "ui/ecu_compare_panel.h"
+#include "ui/ecu_io_panel.h"
 #include "ui/ecu_panel.h"
 #include "ui/ecu_trends_panel.h"
 #include "ui/engine_spec_panel.h"
@@ -87,6 +90,9 @@ typedef struct {
   int logged_speed_idx;
   Trends trends;
   CylTrends cyl_trends;
+  ModelSync shadow_sync;   /* the same engine with its ECU bypassed, for the ECU */
+  ModelState shadow_state; /* Compare panel; stepped alongside the real one */
+  EcuCompareTrends ecu_compare_trends;
   EcuTrends ecu_trends;      /* idle-governor loop history for the ECU panel */
   EcuIdleMode logged_ecu_mode; /* governor mode last checked for event-log lines */
   EngineTrace engine_trace; /* sub-step torque/pressure trace for the Torque
@@ -158,6 +164,8 @@ static void engine_start(AppState *app) {
   EngineRunState before = app->state.engine.run_state;
   engine_model_start(&app->state.engine, &app->sync.engine_config,
                      app->state.cyl);
+  engine_model_start(&app->shadow_state.engine, &app->shadow_sync.engine_config,
+                     app->shadow_state.cyl); /* no-op unless it is stopped */
   if (before == ENGINE_STOPPED) {
     event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ENGINE",
                    "cranking...");
@@ -165,6 +173,7 @@ static void engine_start(AppState *app) {
 }
 
 static void engine_stop(AppState *app) {
+  engine_model_stop(&app->shadow_state.engine);
   if (app->state.engine.run_state == ENGINE_RUNNING) {
     app->engine_stop_requested = true;
     engine_model_stop(&app->state.engine);
@@ -201,6 +210,33 @@ static void idle_governor_toggle(AppState *app) {
   }
 }
 
+/* Injects (or clears) a fault on the ECU's crank-speed input. */
+static void ecu_rpm_fault_set(AppState *app, EcuFaultKind kind, double value) {
+  EcuSensorFault *f = &app->sync.ecu_rpm_fault;
+  const EcuFaultKind before = f->kind;
+  ecu_sensor_fault_set(f, kind, value);
+  if (kind == before) {
+    return; /* just the value moved */
+  }
+  if (kind == ECU_FAULT_NONE) {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ECU",
+                   "crank-speed sensor fault cleared");
+  } else {
+    event_log_push(&app->events, app->sync.sim_time_s, EVENT_WARNING, "ECU",
+                   "crank-speed sensor fault: %s", ecu_fault_kind_name(kind));
+  }
+}
+
+/* The shadow engine for the ECU Compare panel: the same engine and state, with
+ * the ECU bypassed. */
+static void shadow_resync(AppState *app) {
+  app->shadow_sync = app->sync;
+  app->shadow_sync.engine_config.ecu_fitted = 0;
+  app->shadow_state = app->state;
+  app->shadow_state.engine.trace = NULL; /* the trace belongs to the real one */
+  app->shadow_state.ecu.fitted = 0;
+}
+
 /* Cold, stopped engine at sea level, with every monitor and trend cleared.
  * Keeps sync (config, faults, clock), input, sensor and the event log. */
 static void reset_simulation_state(AppState *app) {
@@ -217,6 +253,7 @@ static void reset_simulation_state(AppState *app) {
   app->state.engine.trace =
       &app->engine_trace; /* model_state_init() detached it */
   app->display = app->state;
+  shadow_resync(app);
   app->engine_stop_requested = false;
 
   fault_monitor_init(&app->faults);
@@ -224,6 +261,7 @@ static void reset_simulation_state(AppState *app) {
   trends_init(&app->trends);
   cyl_trends_init(&app->cyl_trends);
   ecu_trends_init(&app->ecu_trends);
+  ecu_compare_init(&app->ecu_compare_trends);
   app->logged_ecu_mode = app->state.ecu.idle_mode;
   app->sample_accum_s = 0.0;
 
@@ -552,6 +590,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   double h;
   while ((h = sim_clock_take_step(&remaining)) > 0.0) {
     model_sync_step(&app->sync, &app->state, &in, &env_in, h);
+    if (app->sync.engine_config.ecu_fitted) {
+      /* same faults, same inputs, no ECU */
+      memcpy(app->shadow_sync.cyl_config, app->sync.cyl_config,
+             sizeof app->shadow_sync.cyl_config);
+      model_sync_step(&app->shadow_sync, &app->shadow_state, &in, &env_in, h);
+    }
   }
   EngineRunState cur_run_state = app->state.engine.run_state;
   if (prev_run_state != ENGINE_STOPPED && cur_run_state == ENGINE_STOPPED) {
@@ -600,6 +644,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                       app->sync.engine_config.num_cylinders);
     ecu_trends_sample(&app->ecu_trends, &app->state); /* the ECU's own numbers
                                                        * are exact, not sensed */
+    if (app->sync.engine_config.ecu_fitted) {
+      ecu_compare_sample(&app->ecu_compare_trends, &app->state,
+                         &app->shadow_state);
+    }
     fault_monitor_check(&app->faults, &app->events, sampled,
                         app->sync.sim_time_s);
     annunciator_update(&app->ann, sampled);
@@ -697,6 +745,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("Torque Ripple", NULL, &app->panels.torque_trace);
       ImGui::MenuItem("ECU", NULL, &app->panels.ecu);
       ImGui::MenuItem("ECU Trends", NULL, &app->panels.ecu_trends);
+      ImGui::MenuItem("ECU I/O", NULL, &app->panels.ecu_io);
+      ImGui::MenuItem("ECU Compare", NULL, &app->panels.ecu_compare);
       ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
       ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
       ImGui::Separator();
@@ -776,6 +826,21 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         ecu_panel_draw(&app->panels.ecu, &app->state, &app->sync.engine_config);
     if (ea.toggle_idle_governor) {
       idle_governor_toggle(app);
+    }
+  }
+  if (app->panels.ecu_io) {
+    const EcuIoActions ia = ecu_io_panel_draw(&app->panels.ecu_io, &app->state,
+                                              &app->sync.ecu_rpm_fault);
+    if (ia.set_rpm_fault) {
+      ecu_rpm_fault_set(app, ia.kind, ia.value);
+    }
+  }
+  if (app->panels.ecu_compare) {
+    if (ecu_compare_panel_draw(&app->panels.ecu_compare, &app->state,
+                               &app->shadow_state, &app->ecu_compare_trends,
+                               app->sync.engine_config.ecu_fitted != 0,
+                               SAMPLE_PERIOD_S)) {
+      shadow_resync(app);
     }
   }
   if (app->panels.ecu_trends) {

@@ -15,6 +15,8 @@ struct PanelVisibility {
   bool torque_trace;
   bool ecu;
   bool ecu_trends;
+  bool ecu_io;
+  bool ecu_compare;
   bool event_log;
   bool gamepad;
   bool controls;

@@ -21,6 +21,25 @@ typedef struct {
   int ignition_on;
 } EcuSensors;
 
+/* A fault on one of the ECU's sensor inputs: what the ECU reads instead of the
+ * truth. Injected between the engine and the ECU, so the engine itself is
+ * untouched. */
+typedef enum {
+  ECU_FAULT_NONE = 0,
+  ECU_FAULT_OFFSET,  /* reads truth + value */
+  ECU_FAULT_SCALE,   /* reads truth * value */
+  ECU_FAULT_STUCK,   /* holds the first value it saw after the fault began */
+  ECU_FAULT_DROPOUT, /* reads 0 */
+  ECU_FAULT_KIND_COUNT
+} EcuFaultKind;
+
+typedef struct {
+  EcuFaultKind kind;
+  double value; /* offset (rpm) or scale factor; unused for STUCK / DROPOUT */
+  double held;  /* the STUCK reading */
+  int held_valid;
+} EcuSensorFault;
+
 /* What the pilot / autopilot asks for */
 typedef struct {
   double throttle; /* 0..1 */
@@ -46,6 +65,7 @@ typedef struct {
   EcuIdleMode idle_mode;
 
   /* the loop, as of the last step (throttle terms are 0..1) */
+  double rpm_seen;        /* crank speed the ECU read, faults included */
   double idle_target_rpm; /* configured target (0 = none) */
   double idle_error_rpm;  /* target - measured, 0 when there is no target */
   double idle_p_term;     /* kp * error */
@@ -75,8 +95,16 @@ void ecu_step(EcuState *e, const EcuConfig *cfg, const EcuSensors *sensors,
  * state records that. Equivalent to a step of an ECU that does nothing. */
 void ecu_bypass(EcuState *e, const EcuPilotCmd *pilot, EcuActuators *out);
 
-/* Short display name, e.g. "REGULATING". */
+/* Sets the fault. Changing the kind restarts it (a STUCK sensor re-latches);
+ * changing only the value leaves a running fault in place. */
+void ecu_sensor_fault_set(EcuSensorFault *f, EcuFaultKind kind, double value);
+
+/* What the ECU reads for a true value `truth`; never negative. */
+double ecu_sensor_fault_apply(EcuSensorFault *f, double truth);
+
+/* Short display names, e.g. "REGULATING", "stuck". */
 const char *ecu_idle_mode_name(EcuIdleMode mode);
+const char *ecu_fault_kind_name(EcuFaultKind kind);
 
 #ifdef __cplusplus
 }

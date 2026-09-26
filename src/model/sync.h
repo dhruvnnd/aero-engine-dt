@@ -7,6 +7,7 @@ extern "C" {
 
 #include "model/state.h"
 #include "physics/cylinder.h"
+#include "physics/ecu.h"
 #include "physics/electrical.h"
 #include "physics/engine_model.h"
 #include "physics/environment.h"
@@ -21,6 +22,7 @@ typedef struct {
   LubeConfig lube_config;
   ElecConfig elec_config;
   CylinderConfig cyl_config[ENGINE_MAX_CYLINDERS]; /* one per cylinder slot */
+  EcuSensorFault ecu_rpm_fault; /* injected fault on the ECU's crank-speed input */
   double sim_time_s; /* accumulated simulated time, passed to the integrators */
 } ModelSync;
 
