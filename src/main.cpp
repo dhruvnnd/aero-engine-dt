@@ -32,6 +32,7 @@
 #include "telemetry/trends.h"
 #include "ui/alarm_strip.h"
 #include "ui/controls_panel.h"
+#include "ui/custom_layouts.h"
 #include "ui/cyl_trends_panel.h"
 #include "ui/ecu_compare_panel.h"
 #include "ui/ecu_faults_panel.h"
@@ -113,6 +114,13 @@ typedef struct {
   double sample_accum_s;
 
   bool engine_stop_requested;
+
+  CustomLayoutSet custom_layouts;
+  int custom_layout_active;  /* index into custom_layouts, or -1 */
+  int custom_layout_pending; /* index to apply next frame, or -1 */
+  bool open_save_layout_popup;
+  bool open_manage_layouts_popup;
+  char save_layout_name[CUSTOM_LAYOUT_NAME_LEN];
 } AppState;
 
 static AppState g_app_state;
@@ -142,6 +150,77 @@ static void acknowledge_alarms(AppState *app) {
   annunciator_acknowledge(&app->ann);
   event_log_push(&app->events, app->sync.sim_time_s, EVENT_INFO, "ALARM",
                  "alarms acknowledged");
+}
+
+static void draw_layout_popups(AppState *app) {
+  if (app->open_save_layout_popup) {
+    ImGui::OpenPopup("Save Layout");
+    app->open_save_layout_popup = false;
+  }
+  if (ImGui::BeginPopupModal("Save Layout", NULL,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextUnformatted("Saves the current panel arrangement");
+    bool enter = ImGui::InputText("Name", app->save_layout_name,
+                                  sizeof app->save_layout_name,
+                                  ImGuiInputTextFlags_EnterReturnsTrue);
+    if (ImGui::IsWindowAppearing()) {
+      ImGui::SetKeyboardFocusHere(-1);
+    }
+    const bool can_save = app->save_layout_name[0] != '\0';
+    ImGui::BeginDisabled(!can_save);
+    const bool save = ImGui::Button("Save") || (enter && can_save);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    const bool cancel = ImGui::Button("Cancel");
+    if (save) {
+      custom_layouts_capture(&app->custom_layouts, app->save_layout_name,
+                             &app->panels);
+      /* select whichever slot it landed in */
+      for (int i = 0; i < app->custom_layouts.count; i++) {
+        if (!strcmp(app->custom_layouts.items[i].name, app->save_layout_name)) {
+          app->custom_layout_active = i;
+          break;
+        }
+      }
+      ImGui::CloseCurrentPopup();
+    } else if (cancel) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+
+  if (app->open_manage_layouts_popup) {
+    ImGui::OpenPopup("Manage Saved Layouts");
+    app->open_manage_layouts_popup = false;
+  }
+  if (ImGui::BeginPopupModal("Manage Saved Layouts", NULL,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    for (int i = 0; i < app->custom_layouts.count;) {
+      ImGui::TextUnformatted(app->custom_layouts.items[i].name);
+      ImGui::SameLine();
+      ImGui::PushID(i);
+      if (ImGui::SmallButton("Delete")) {
+        custom_layouts_remove(&app->custom_layouts, i);
+        if (app->custom_layout_active == i) {
+          app->custom_layout_active = -1;
+        } else if (app->custom_layout_active > i) {
+          app->custom_layout_active--;
+        }
+        ImGui::PopID();
+        continue; /* re-check the same index; it now holds the next item */
+      }
+      ImGui::PopID();
+      i++;
+    }
+    if (app->custom_layouts.count == 0) {
+      ImGui::TextDisabled("No saved layouts.");
+    }
+    ImGui::Separator();
+    if (ImGui::Button("Close")) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
 }
 
 /* File > Load engine spec: the dialog callback may run on another thread, so it
@@ -487,6 +566,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   app->show_implot_demo = false;
   app->show_imgui_demo = false;
 
+  custom_layouts_load(&app->custom_layouts);
+  app->custom_layout_active = -1;
+  app->custom_layout_pending = -1;
+  app->open_save_layout_popup = false;
+  app->open_manage_layouts_popup = false;
+  app->save_layout_name[0] = '\0';
+
   event_log_init(&app->events);
   event_log_push(&app->events, 0.0, EVENT_INFO, "SYSTEM", "dashboard started");
 
@@ -753,7 +839,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     layout_apply(app->layout_pending, ImGui::GetMainViewport()->WorkSize);
     app->panels = layout_visibility(app->layout_pending);
     app->layout_current = app->layout_pending;
+    app->custom_layout_active = -1;
     app->layout_pending = -1;
+  }
+  if (app->custom_layout_pending >= 0) {
+    custom_layouts_apply(&app->custom_layouts, app->custom_layout_pending,
+                         &app->panels);
+    app->custom_layout_active = app->custom_layout_pending;
+    app->custom_layout_pending = -1;
   }
   ImGui::DockSpaceOverViewport(layout_dockspace_id(), ImGui::GetMainViewport(),
                                ImGuiDockNodeFlags_None);
@@ -797,13 +890,37 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
     if (ImGui::BeginMenu("Layout")) {
       for (int i = 0; i < LAYOUT_COUNT; i++) {
-        if (ImGui::MenuItem(layout_name(i), NULL, app->layout_current == i)) {
+        if (ImGui::MenuItem(layout_name(i), NULL,
+                            app->custom_layout_active < 0 &&
+                                app->layout_current == i)) {
           app->layout_pending = i;
         }
       }
       ImGui::Separator();
       if (ImGui::MenuItem("Reset current layout")) {
-        app->layout_pending = app->layout_current;
+        if (app->custom_layout_active >= 0) {
+          app->custom_layout_pending = app->custom_layout_active;
+        } else {
+          app->layout_pending = app->layout_current;
+        }
+      }
+      if (app->custom_layouts.count > 0) {
+        ImGui::Separator();
+        for (int i = 0; i < app->custom_layouts.count; i++) {
+          if (ImGui::MenuItem(app->custom_layouts.items[i].name, NULL,
+                              app->custom_layout_active == i)) {
+            app->custom_layout_pending = i;
+          }
+        }
+      }
+      ImGui::Separator();
+      if (ImGui::MenuItem("Save current layout...")) {
+        app->save_layout_name[0] = '\0';
+        app->open_save_layout_popup = true;
+      }
+      if (app->custom_layouts.count > 0 &&
+          ImGui::MenuItem("Manage saved layouts...")) {
+        app->open_manage_layouts_popup = true;
       }
       ImGui::EndMenu();
     }
@@ -858,6 +975,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
     ImGui::EndMainMenuBar();
   }
+  draw_layout_popups(app);
 
   if (app->panels.alarms && alarm_strip_draw(&app->panels.alarms, &app->ann)) {
     acknowledge_alarms(app);
