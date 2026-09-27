@@ -230,6 +230,39 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      "in-cylinder heat (the rest is lost to cylinder walls and exhaust --\n"
      "this single-zone model has no heat-transfer correlation, so this\n"
      "stands in for it). Typical range: 0.25 - 0.35; must be in (0,1]."},
+
+    /* ---- volumetric efficiency curve (Phase 3) ---- */
+    {"ve_peak", "VE peak", "", G_COMB, OFF(geom.ve_peak), 0.0, 1.2,
+     CFG_MIN_EXCL, 0.85, 1.0, 0.3, 1.2, "%.3f", 1.0, "",
+     "Volumetric efficiency at the curve's peak (near ve_peak_rpm).\n"
+     "Typical range: 0.85 - 1.0 -- the crank-angle combustion model had no\n"
+     "VE factor before Phase 3, so the default peaks near 1.0 to keep the\n"
+     "already-tuned sweet-spot magnitude (combustion_efficiency) close to\n"
+     "validated behavior while adding real RPM/MAP-shaped falloff."},
+    {"ve_peak_rpm", "VE peak rpm", "rpm", G_COMB, OFF(geom.ve_peak_rpm),
+     POS_EXCL, 1800.0, 2600.0, 500.0, 8000.0, "%.0f", 1.0, "rpm",
+     "RPM at which volumetric efficiency peaks -- roughly the torque-peak\n"
+     "RPM. Keep this at or below the engine's redline: a peak above\n"
+     "redline means the curve never actually reaches its best point in\n"
+     "normal operation, which defeats the point of shaping it. Typical\n"
+     "range: 1800 - 2600."},
+    {"ve_min", "VE floor", "", G_COMB, OFF(geom.ve_min), 0.0, 1.2,
+     CFG_MIN_EXCL, 0.8, 0.95, 0.05, 1.0, "%.3f", 1.0, "",
+     "Volumetric efficiency floor at the curve's RPM extremes (idle and\n"
+     "redline). Typical range: 0.8 - 0.95; must be less than ve_peak for\n"
+     "the curve to actually peak (not enforced -- a flat/inverted curve\n"
+     "just stops being an accuracy improvement over the old constant).\n"
+     "Kept fairly shallow: the idle governor (Phase 4) only has ~0.15\n"
+     "throttle authority above stall, so a deep idle-RPM VE dip on top of\n"
+     "that thin margin stalls the engine outright rather than just\n"
+     "reshaping the torque curve."},
+    {"ve_width_rpm", "VE curve width", "rpm", G_COMB, OFF(geom.ve_width_rpm),
+     POS_EXCL, 3000.0, 5000.0, 200.0, 10000.0, "%.0f", 1.0, "rpm",
+     "RPM spread from ve_peak_rpm to where VE reaches ve_min, each side of\n"
+     "the peak (the curve is a parabola in RPM, clamped at ve_min beyond\n"
+     "this spread). Wide by real-engine standards, again to keep the idle\n"
+     "governor's thin authority margin intact -- see ve_min. Typical\n"
+     "range: 1500 - 3000."},
 };
 const int ENGINE_CONFIG_FIELD_COUNT =
     (int)(sizeof ENGINE_CONFIG_FIELDS / sizeof ENGINE_CONFIG_FIELDS[0]);

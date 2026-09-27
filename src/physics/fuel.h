@@ -5,14 +5,14 @@
 extern "C" {
 #endif
 
-#include "physics/cylinder.h" /* CylinderConfig */
+#include "physics/crank_thermo.h" /* EngineGeometry, volumetric_efficiency() */
+#include "physics/cylinder.h"     /* CylinderConfig */
 
 /* Engine air / fuel mass balance */
 
 typedef struct {
   double afr_stoich;     /* stoichiometric air/fuel mass ratio (~14.7) */
   double lambda_target;  /* commanded mixture, 1.0 = stoichiometric */
-  double vol_eff;        /* volumetric efficiency, fraction */
   double displacement_l; /* total swept volume, litres */
   double pump_press_kpa; /* fuel-rail pressure at zero demand */
 } FuelConfig;
@@ -29,10 +29,12 @@ FuelConfig fuel_config_default(void);
 /* Zeroes all flows and pressure (engine not running). */
 void fuel_state_init(FuelState *state);
 
-/* Refreshes the fuel state from the current operating point */
+/* Refreshes the fuel state from the current operating point; pass
+ * the same EngineConfig.geom the engine model itself is running. */
 void fuel_step(FuelState *state, const FuelConfig *config,
-               const CylinderConfig *cyl, int num_cylinders, double map_kpa,
-               double rpm, double intake_temp_c);
+               const EngineGeometry *geom, const CylinderConfig *cyl,
+               int num_cylinders, double map_kpa, double rpm,
+               double intake_temp_c);
 
 #ifdef __cplusplus
 }

@@ -155,7 +155,6 @@ void engine_spec_panel_draw(bool *open, const ModelSync *sync,
     const FuelConfig &f = sync->fuel_config;
     row("stoichiometric AFR", f.afr_stoich, "");
     row("target lambda", f.lambda_target, "");
-    row("volumetric efficiency", f.vol_eff, "");
     row("displacement", f.displacement_l, "L");
     row("pump pressure", f.pump_press_kpa, "kPa");
     ImGui::EndTable();

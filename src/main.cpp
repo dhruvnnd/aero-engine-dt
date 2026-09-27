@@ -48,6 +48,7 @@
 #include "ui/spec_editor_panel.h"
 #include "ui/torque_trace_panel.h"
 #include "ui/trends_panel.h"
+#include "ui/ve_curve_panel.h"
 
 /* Initial window size; shrunk to fit the display if it is too big. */
 #define WIN_W 1680
@@ -840,6 +841,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (ImGui::BeginMenu("Config")) {
       ImGui::MenuItem("Engine Spec", NULL, &app->panels.engine_spec);
       ImGui::MenuItem("Spec Editor", NULL, &app->panels.spec_editor);
+      ImGui::MenuItem("VE Curve", NULL, &app->panels.ve_curve);
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Debug")) {
@@ -869,6 +871,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   if (app->panels.engine_spec) {
     engine_spec_panel_draw(&app->panels.engine_spec, &app->sync,
                            app->spec_path);
+  }
+  if (app->panels.ve_curve) {
+    ve_curve_panel_draw(&app->panels.ve_curve, &app->sync.engine_config,
+                        app->state.rpm);
   }
   if (app->panels.spec_editor) {
     const SpecEditorResult ed = spec_editor_panel_draw(

@@ -55,6 +55,18 @@ EngineGeometry engine_geometry_default(void) {
   g.spark_rpm_gain_deg_per_1000rpm = 6.0;
   g.spark_map_retard_deg_per_kpa = 0.15;
   g.combustion_efficiency = 0.30;
+  /* Peak near 1.0, not the old flat 0.85: the crank-angle combustion path
+   * never had a VE factor before Phase 3 (the old vol_eff = 0.85 only ever
+   * fed fuel.c's separate air/fuel accounting, decoupled from combustion
+   * heat), and combustion_efficiency above was already tuned against that
+   * effective VE=1.0 baseline. Peaking near 1.0 keeps the sweet-spot
+   * magnitude close to already-validated behavior while still adding the
+   * real RPM/MAP-shaped falloff everywhere else -- the actual point of this
+   * phase (see docs/physical_modeling_plan.md, Phase 3). */
+  g.ve_peak = 1.0;
+  g.ve_peak_rpm = 2400.0; /* near the ~2700 rpm redline, not above it */
+  g.ve_min = 0.9;
+  g.ve_width_rpm = 4000.0;
   return g;
 }
 
@@ -192,6 +204,28 @@ double spark_advance_curve(double rpm, double map_kpa,
     adv = max_btdc;
   }
   return adv;
+}
+
+double volumetric_efficiency(double rpm, double map_kpa,
+                             const EngineGeometry *geom) {
+  (void)map_kpa;
+
+  double width = geom->ve_width_rpm > 1.0 ? geom->ve_width_rpm : 1.0;
+  double t = (rpm - geom->ve_peak_rpm) / width;
+  if (t < -1.0) {
+    t = -1.0;
+  }
+  if (t > 1.0) {
+    t = 1.0;
+  }
+  double ve = geom->ve_peak - (geom->ve_peak - geom->ve_min) * t * t;
+  if (ve < 0.05) {
+    ve = 0.05;
+  }
+  if (ve > 1.2) {
+    ve = 1.2;
+  }
+  return ve;
 }
 
 double cylinder_gas_torque_nm(double theta_deg, double pressure_kpa,

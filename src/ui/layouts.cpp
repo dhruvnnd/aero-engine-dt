@@ -53,6 +53,7 @@ PanelVisibility layout_visibility(int id) {
   v.ecu_compare = true;
   v.ecu_faults = true;
   v.engine_faults = true;
+  v.ve_curve = true;
   return v;
 }
 
@@ -105,7 +106,7 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(right, PANEL_INSTRUMENTS);
     DOCK(right_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
          PANEL_CONTROLS, PANEL_ECU, PANEL_ECU_IO, PANEL_ECU_FAULTS, PANEL_FAULTS, PANEL_ENGINE_FAULTS, PANEL_EVENT_LOG, PANEL_GAMEPAD,
-         PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
+         PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR, PANEL_VE_CURVE);
     break;
   }
   case LAYOUT_SYSTEMS: {
@@ -119,7 +120,7 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(environment, PANEL_ENVIRONMENT);
     DOCK(rest, PANEL_SIM, PANEL_CONTROLS, PANEL_ECU, PANEL_ECU_IO, PANEL_ECU_FAULTS, PANEL_FAULTS, PANEL_ENGINE_FAULTS, PANEL_EVENT_LOG,
          PANEL_GAMEPAD,
-         PANEL_TRENDS, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
+         PANEL_TRENDS, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR, PANEL_VE_CURVE);
     break;
   }
   case LAYOUT_INPUT_LOG: {
@@ -132,7 +133,7 @@ void layout_apply(int id, ImVec2 size) {
          PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE, PANEL_ECU_TRENDS, PANEL_ECU_COMPARE);
     DOCK(right, PANEL_GAMEPAD);
     DOCK(right_bottom, PANEL_SIM, PANEL_CONTROLS, PANEL_ECU, PANEL_ECU_IO, PANEL_ECU_FAULTS, PANEL_FAULTS, PANEL_ENGINE_FAULTS,
-         PANEL_ENVIRONMENT, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR);
+         PANEL_ENVIRONMENT, PANEL_ENGINE_SPEC, PANEL_SPEC_EDITOR, PANEL_VE_CURVE);
     break;
   }
   case LAYOUT_CONFIG: {
@@ -140,7 +141,7 @@ void layout_apply(int id, ImVec2 size) {
      * other panel tabbed with them (closed until opened from View) */
     ImGuiID left = carve(rest, ImGuiDir_Left, 0.38f);
     ImGuiID bottom = carve(rest, ImGuiDir_Down, 0.24f);
-    DOCK(left, PANEL_ENGINE_SPEC);
+    DOCK(left, PANEL_ENGINE_SPEC, PANEL_VE_CURVE);
     DOCK(rest, PANEL_SPEC_EDITOR);
     DOCK(bottom, PANEL_EVENT_LOG, PANEL_SIM, PANEL_CONTROLS, PANEL_FAULTS, PANEL_ENGINE_FAULTS,
          PANEL_INSTRUMENTS, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_TRENDS,
@@ -156,7 +157,7 @@ void layout_apply(int id, ImVec2 size) {
     DOCK(left, PANEL_INSTRUMENTS);
     DOCK(left_bottom, PANEL_CYLINDERS, PANEL_ENVIRONMENT, PANEL_SIM,
          PANEL_CONTROLS, PANEL_ECU, PANEL_ECU_IO, PANEL_ECU_FAULTS, PANEL_FAULTS, PANEL_ENGINE_FAULTS, PANEL_ENGINE_SPEC,
-         PANEL_SPEC_EDITOR);
+         PANEL_SPEC_EDITOR, PANEL_VE_CURVE);
     DOCK(rest, PANEL_TRENDS, PANEL_CYL_TRENDS, PANEL_TORQUE_TRACE,
          PANEL_ECU_TRENDS, PANEL_ECU_COMPARE);
     DOCK(right_bottom, PANEL_EVENT_LOG, PANEL_GAMEPAD);

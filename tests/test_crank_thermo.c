@@ -118,6 +118,28 @@ static void test_spark_advance_increases_with_rpm_decreases_with_map(void) {
   CHECK(high_map < low_map);
 }
 
+/* VE rises from idle to a peak near ve_peak_rpm, then falls off toward
+ * redline (Phase 3, docs/physical_modeling_plan.md). RPM-only for now --
+ * map_kpa is accepted but deliberately unused (see the .c file's comment),
+ * so it's passed two different values here to confirm that. */
+static void test_volumetric_efficiency_peaks_and_falls_off(void) {
+  EngineGeometry g = engine_geometry_default();
+
+  double idle = volumetric_efficiency(800.0, 30.0, &g);
+  double peak = volumetric_efficiency(g.ve_peak_rpm, 90.0, &g);
+  double redline = volumetric_efficiency(6000.0, 90.0, &g);
+
+  CHECK_NEAR(peak, g.ve_peak, 1e-9);
+  CHECK(peak > idle);
+  CHECK(peak > redline);
+  CHECK(idle >= g.ve_min - 1e-9);
+  CHECK(redline >= g.ve_min - 1e-9);
+
+  double same_rpm_low_map = volumetric_efficiency(2000.0, 30.0, &g);
+  double same_rpm_high_map = volumetric_efficiency(2000.0, 90.0, &g);
+  CHECK_NEAR(same_rpm_low_map, same_rpm_high_map, 1e-12);
+}
+
 /* Gas torque must vanish at TDC/BDC (dV/dtheta = 0 there) regardless of
  * pressure, and be positive during expansion just after TDC firing (theta
  * just above 0) at a plausible post-combustion pressure. */
@@ -290,6 +312,8 @@ static const TestCase CASES[] = {
      test_wiebe_rate_matches_finite_difference},
     {"crank_thermo.spark_advance_increases_with_rpm_decreases_with_map",
      test_spark_advance_increases_with_rpm_decreases_with_map},
+    {"crank_thermo.volumetric_efficiency_peaks_and_falls_off",
+     test_volumetric_efficiency_peaks_and_falls_off},
     {"crank_thermo.gas_torque_zero_at_dead_centers",
      test_gas_torque_zero_at_dead_centers},
     {"crank_thermo.inertia_torque_zero_at_dead_centers_and_zero_mean",

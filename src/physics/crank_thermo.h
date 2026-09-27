@@ -21,6 +21,11 @@ typedef struct {
   double spark_map_retard_deg_per_kpa;   /* advance removed per kPa of MAP */
   double combustion_efficiency; /* fraction of the fuel's chemical energy that
                                    manifests as effective in-cylinder heat*/
+
+  double ve_peak;      /* VE at the curve's peak, fraction */
+  double ve_peak_rpm;  /* RPM where VE peaks */
+  double ve_min;       /* VE floor at the curve's RPM extremes */
+  double ve_width_rpm; /* RPM spread from the peak to the floor, each side */
 } EngineGeometry;
 
 EngineGeometry engine_geometry_default(void);
@@ -58,6 +63,9 @@ double wiebe_burn_rate_per_deg(double theta_deg, double theta_start_deg,
  * retards with MAP/load) */
 double spark_advance_curve(double rpm, double map_kpa,
                            const EngineGeometry *geom);
+
+double volumetric_efficiency(double rpm, double map_kpa,
+                             const EngineGeometry *geom);
 
 /* Gas-pressure torque at crank angle theta_deg given the cylinder's current
  * pressure, N*m */

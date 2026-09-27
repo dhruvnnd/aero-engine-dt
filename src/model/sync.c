@@ -116,9 +116,9 @@ void model_sync_step(ModelSync *sync, ModelState *state,
 
   /* Fuel path reads the settled operating point (rpm just refreshed above);
    * intake temp is the ambient proxy until MAT lands. */
-  fuel_step(&state->fuel, &sync->fuel_config, sync->cyl_config,
-            sync->engine_config.num_cylinders, state->engine.map_kpa,
-            state->rpm, ambient_temp_c);
+  fuel_step(&state->fuel, &sync->fuel_config, &sync->engine_config.geom,
+            sync->cyl_config, sync->engine_config.num_cylinders,
+            state->engine.map_kpa, state->rpm, ambient_temp_c);
 
   /* Oil pressure from the settled crank speed and current oil temperature. */
   lube_step(&state->lube, &sync->lube_config, state->rpm,

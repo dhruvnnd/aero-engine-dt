@@ -25,6 +25,7 @@ struct PanelVisibility {
   bool faults;
   bool engine_spec;
   bool spec_editor;
+  bool ve_curve;
 };
 
 enum {

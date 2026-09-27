@@ -6,6 +6,7 @@
 #define PANEL_ALARMS "Alarms"
 #define PANEL_ENGINE_SPEC "Engine Spec"
 #define PANEL_SPEC_EDITOR "Spec Editor"
+#define PANEL_VE_CURVE "VE Curve"
 #define PANEL_SIM "Sim"
 #define PANEL_CONTROLS "Controls"
 #define PANEL_FAULTS "Fault Injection"

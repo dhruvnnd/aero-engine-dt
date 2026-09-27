@@ -126,9 +126,11 @@ static double cylinder_dq_ddeg(const EngineDerivParams *p, int i, double rpm,
   double q_total_j = cylinder_charge_energy_j_with_vivc(
       map_kpa, p->intake_temp_c, p->v_ivc_m3[i], p->geom,
       p->fuel_cfg->afr_stoich, lambda, misfire);
+  q_total_j *= volumetric_efficiency(rpm, map_kpa, p->geom);
   return q_total_j * wiebe_burn_rate_per_deg(theta_local, theta_start,
                                              p->geom->delta_theta_burn_deg,
-                                             p->geom->wiebe_a, p->geom->wiebe_m);
+                                             p->geom->wiebe_a,
+                                             p->geom->wiebe_m);
 }
 
 static void engine_derivative(const double *state, double *dstate, double t,
@@ -400,14 +402,14 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
     const double dtheta_deg = dtheta_rad * (180.0 / UNITS_PI);
     const double rpm = rad_s_to_rpm(omega);
     for (int i = 0; i < n_cyl; i++) {
-      const double local_after = crank_wrap720_deg(
-          vec[ENGINE_STATE_THETA] - params.phase_offset_deg[i]);
+      const double local_after = crank_wrap720_deg(vec[ENGINE_STATE_THETA] -
+                                                   params.phase_offset_deg[i]);
       const double local_before =
           crank_wrap720_deg(theta_before - params.phase_offset_deg[i]);
       work_j[i] += gas[i] * dtheta_rad;
       if (cylinder_valve_closed(local_after, params.geom)) {
-        heat_j[i] += cylinder_dq_ddeg(&params, i, rpm,
-                                      vec[ENGINE_STATE_MAP], local_after) *
+        heat_j[i] += cylinder_dq_ddeg(&params, i, rpm, vec[ENGINE_STATE_MAP],
+                                      local_after) *
                      dtheta_deg;
       }
       if (local_before < config->geom.evo_deg &&
@@ -415,10 +417,11 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
         /* exhaust valve opens: temperature of the burnt charge from the
          * ideal-gas law on the trapped air + fuel */
         const double lam = cylinder_lambda(&cylinders[i]);
-        const double m_air_kg = kpa_to_pa(vec[ENGINE_STATE_MAP]) *
-                                params.v_ivc_m3[i] /
-                                (r_gas_j_per_kgk * celsius_to_kelvin(intake_temp_c));
-        const double m_kg = m_air_kg * (1.0 + 1.0 / (mix_afr_stoich * (lam > 0.1 ? lam : 0.1)));
+        const double m_air_kg =
+            kpa_to_pa(vec[ENGINE_STATE_MAP]) * params.v_ivc_m3[i] /
+            (r_gas_j_per_kgk * celsius_to_kelvin(intake_temp_c));
+        const double m_kg =
+            m_air_kg * (1.0 + 1.0 / (mix_afr_stoich * (lam > 0.1 ? lam : 0.1)));
         const double v_m3 =
             cylinder_volume_m3(local_before, &config->geom, params.eff_cr[i]);
         blowdown_c[i] = kelvin_to_celsius(kpa_to_pa(p_before[i]) * v_m3 /
@@ -454,11 +457,10 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
   /* Frame values are lumpy (a frame holds a fraction of a firing), so the
    * outputs are averaged over about two engine cycles. */
   const double vd_m3 = cylinder_displacement_m3(&config->geom);
-  state->friction_w =
-      engine_friction_torque_nm(config, state->omega_rad_s) * state->omega_rad_s;
-  const double cycle_s = state->omega_rad_s > 1.0
-                             ? 4.0 * UNITS_PI / state->omega_rad_s
-                             : 1.0;
+  state->friction_w = engine_friction_torque_nm(config, state->omega_rad_s) *
+                      state->omega_rad_s;
+  const double cycle_s =
+      state->omega_rad_s > 1.0 ? 4.0 * UNITS_PI / state->omega_rad_s : 1.0;
   const double alpha = 1.0 - exp(-covered_s / (2.0 * cycle_s));
   for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
     CylinderThermalInput *out = &state->cyl_thermal[i];

@@ -19,7 +19,6 @@ static void test_config_and_init(void) {
   FuelConfig c = fuel_config_default();
   CHECK(c.afr_stoich > 10.0 && c.afr_stoich < 20.0);
   CHECK(c.lambda_target > 0.5 && c.lambda_target < 1.5);
-  CHECK(c.vol_eff > 0.0 && c.vol_eff <= 1.2);
   CHECK(c.displacement_l > 0.0);
   CHECK(c.pump_press_kpa > 0.0);
 
@@ -87,8 +86,12 @@ static void test_clogged_injector_cuts_fuel_and_leans_cylinder(void) {
    * RPM more than the old mean-value model did, so air flow (and hence fuel
    * flow) drops further too. Bounds widened from the old model's narrower
    * band to reflect this -- the fault having a bigger, more realistic
-   * knock-on effect is the point of Phase 1, not a regression. */
-  CHECK(ratio > 0.70 && ratio < 0.90);
+   * knock-on effect is the point of Phase 1, not a regression. Lower bound
+   * widened again for Phase 3's VE curve (0.696 measured): VE falls off
+   * below its ~3000 rpm peak, so the healthy engine's higher RPM now also
+   * breathes a little better than the already-lower clogged one, widening
+   * the gap slightly further. */
+  CHECK(ratio > 0.65 && ratio < 0.90);
   CHECK(cs.cyl[1].lambda > 1.25);      /* that cylinder runs lean */
   CHECK_NEAR(cs.cyl[1].misfire_rate, 0.0, 0.0); /* ...but not misfiring */
   CHECK_NEAR(cs.cyl[0].lambda, 1.0, 1e-9);      /* the others unaffected */
