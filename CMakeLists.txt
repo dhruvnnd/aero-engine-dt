@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(aero_engine_dt VERSION 0.2.0 LANGUAGES C CXX)
+project(aero_engine_dt VERSION 0.2.2 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
