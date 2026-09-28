@@ -1,7 +1,5 @@
 #include "physics/fuel.h"
 
-#include "math/units.h"
-
 FuelConfig fuel_config_default(void) {
   FuelConfig c;
   c.afr_stoich = 14.7;      /* gasoline */
@@ -17,19 +15,13 @@ void fuel_state_init(FuelState *state) {
   state->fuel_press_kpa = 0.0;
 }
 
-/* Engine air mass flow, g/s. Four-stroke: each cylinder ingests one full
- * charge every two crank revolutions, at volumetric_efficiency() of the
- * ideal displacement rate */
+/* Engine air mass flow, g/s */
 static double air_flow_gps(const FuelConfig *c, const EngineGeometry *geom,
                            double map_kpa, double intake_temp_c, double rpm) {
-  const double air_r_j_per_kg_k = 287.05;
-
-  double rho_kg_m3 = kpa_to_pa(map_kpa) /
-                     (air_r_j_per_kg_k * celsius_to_kelvin(intake_temp_c));
   double disp_m3 = c->displacement_l * 1.0e-3;
-  double ve = volumetric_efficiency(rpm, map_kpa, geom);
-  double volume_flow_m3_s = ve * disp_m3 * (rpm / 60.0) / 2.0;
-  return rho_kg_m3 * volume_flow_m3_s * 1000.0; /* kg -> g */
+  return engine_induction_air_flow_kg_s(rpm, map_kpa, intake_temp_c, geom,
+                                        disp_m3) *
+         1000.0; /* kg -> g */
 }
 
 void fuel_step(FuelState *state, const FuelConfig *config,

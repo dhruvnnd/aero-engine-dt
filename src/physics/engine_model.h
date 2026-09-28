@@ -19,6 +19,7 @@ extern "C" {
 #include "physics/cylinder.h"
 #include "physics/ecu.h"
 #include "physics/fuel.h"
+#include "physics/intake.h"
 #include "physics/propeller.h"
 
 #define ENGINE_MAX_CYLINDERS 6
@@ -60,7 +61,6 @@ typedef struct {
 
 typedef struct {
   double inertia_kg_m2; /* effective rotating inertia */
-  double map_tau_s;     /* manifold filling time constant, s */
   double friction_coeff_nm_per_rad_s;
   double friction_fmep_const_kpa;
   double friction_fmep_per_ms_kpa;
@@ -82,6 +82,7 @@ typedef struct {
 
   PropConfig prop;
   EcuConfig ecu;
+  IntakeConfig intake;
 } EngineConfig;
 
 EngineConfig engine_config_default(void);

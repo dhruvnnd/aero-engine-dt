@@ -22,12 +22,13 @@ typedef struct {
   double load_torque_nm;
   double ambient_pressure_kpa;
   double inertia_kg_m2;
-  double map_tau_s;
   double fric_const_nm;         /* friction at any forward speed, N*m */
   double fric_lin_nm_per_rad_s; /* friction growing with crank speed */
   const CylinderConfig *cylinders;
   int num_cylinders;
   const EngineGeometry *geom;
+  const IntakeConfig *intake;
+  double total_disp_m3; /* cylinder_displacement_m3(geom) * num_cylinders */
   const FuelConfig *fuel_cfg;
   double intake_temp_c;
   double eff_cr[ENGINE_MAX_CYLINDERS];
@@ -61,18 +62,6 @@ double engine_friction_torque_nm(const EngineConfig *cfg, double omega_rad_s) {
   double c, l;
   friction_terms(cfg, &c, &l);
   return c + l * omega_rad_s;
-}
-
-static double map_target_kpa(double throttle, double ambient_pressure_kpa) {
-  /* Closed-throttle MAP as a fixed fraction of ambient (30 kPa at sea level).
-   * A fixed vacuum drop below ambient went to zero at altitude, where a closed
-   * throttle then left the engine with no air at all and stalled it. */
-  const double idle_map_fraction = 0.2963;
-
-  double map_idle_kpa = ambient_pressure_kpa * idle_map_fraction;
-  double map_wot_kpa = ambient_pressure_kpa;
-
-  return map_idle_kpa + throttle * (map_wot_kpa - map_idle_kpa);
 }
 
 /* Crank torque at the state in `vec`: each cylinder's gas + inertia torque,
@@ -189,16 +178,24 @@ static void engine_derivative(const double *state, double *dstate, double t,
   double torque_net = torque_total - torque_friction - p->load_torque_nm;
 
   dstate[ENGINE_STATE_OMEGA] = torque_net / p->inertia_kg_m2;
-  dstate[ENGINE_STATE_MAP] =
-      (map_target_kpa(p->throttle, p->ambient_pressure_kpa) - map_kpa) /
-      p->map_tau_s;
+
+  /* Plenum mass balance: throttle-plate flow in, cylinder induction flow
+   * out. dP/dt = R*T/V * (mdot_in - mdot_out). */
+  double mdot_in = throttle_flow_kg_s(p->throttle, p->ambient_pressure_kpa,
+                                      map_kpa, p->intake_temp_c, p->intake);
+  double mdot_out = engine_induction_air_flow_kg_s(
+      rpm, map_kpa, p->intake_temp_c, p->geom, p->total_disp_m3);
+  double t_k = celsius_to_kelvin(p->intake_temp_c);
+  const double r_air_j_per_kgk = 287.05;
+  dstate[ENGINE_STATE_MAP] = pa_to_kpa(
+      (r_air_j_per_kgk * t_k / p->intake->plenum_vol_m3) * (mdot_in - mdot_out));
+
   dstate[ENGINE_STATE_THETA] = dtheta_dt_deg_per_s;
 }
 
 EngineConfig engine_config_default(void) {
   EngineConfig cfg;
   cfg.inertia_kg_m2 = 0.6;
-  cfg.map_tau_s = 0.25;
   cfg.friction_coeff_nm_per_rad_s = 0.02;
   cfg.friction_fmep_const_kpa = 40.0;
   cfg.friction_fmep_per_ms_kpa = 14.0;
@@ -222,6 +219,7 @@ EngineConfig engine_config_default(void) {
 
   cfg.prop = prop_config_default();
   cfg.ecu = ecu_config_default();
+  cfg.intake = intake_config_default();
 
   return cfg;
 }
@@ -318,11 +316,12 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
   params.load_torque_nm = input->load_torque_nm;
   params.ambient_pressure_kpa = input->ambient_pressure_kpa;
   params.inertia_kg_m2 = config->inertia_kg_m2;
-  params.map_tau_s = config->map_tau_s;
   friction_terms(config, &params.fric_const_nm, &params.fric_lin_nm_per_rad_s);
   params.cylinders = cylinders;
   params.num_cylinders = n_cyl;
   params.geom = &config->geom;
+  params.intake = &config->intake;
+  params.total_disp_m3 = cylinder_displacement_m3(&config->geom) * (double)n_cyl;
   params.fuel_cfg = fuel_cfg;
   params.intake_temp_c = intake_temp_c;
   params.cranking = was_cranking;

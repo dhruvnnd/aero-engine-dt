@@ -161,16 +161,25 @@ static void test_prop_load_reaches_the_crank(void) {
 }
 
 /* The standing sanity check: throttle 0 -> 1 gives a monotonic, bounded
- * equilibrium RPM (the flat placeholder load had no such restoring torque). */
+ * equilibrium RPM (the flat placeholder load had no such restoring torque).
+ * Recalibrated for Phase 5: the throttle-plate orifice model concentrates
+ * most of the flow gain in the first half of the travel (MAP is already
+ * near ambient by 0.4-0.6), so the back half's per-step rise is small --
+ * expected, not a regression. Monotonic + an overall span replaces the old
+ * uniform per-step minimum. */
 static void test_throttle_sweep_gives_monotonic_bounded_rpm(void) {
-  double prev = 0.0;
+  double first = -1.0, prev = 0.0;
   for (int k = 0; k <= 5; k++) {
     ModelState s = settle(4, 0.2 * k, 0.0, 0.0, 0.0, -1.0);
     CHECK(s.engine.run_state == ENGINE_RUNNING);
-    CHECK(s.rpm > prev + 100.0);
+    CHECK(s.rpm > prev - 1e-6); /* monotonic non-decreasing */
     CHECK(s.rpm < 4000.0);
+    if (first < 0.0) {
+      first = s.rpm;
+    }
     prev = s.rpm;
   }
+  CHECK(prev > first + 1000.0); /* still a big, meaningful overall rise */
 }
 
 /* A propeller keeps every cylinder count bounded, and more cylinders (more

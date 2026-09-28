@@ -33,7 +33,7 @@ static void test_check_reports_each_problem_with_a_message(void) {
 static void test_check_count_can_exceed_message_capacity(void) {
   EngineConfig cfg = engine_config_default();
   cfg.inertia_kg_m2 = 0.0;
-  cfg.map_tau_s = 0.0;
+  cfg.intake.plenum_vol_m3 = 0.0;
   cfg.friction_coeff_nm_per_rad_s = 0.0;
 
   char msgs[1][ENGINE_CONFIG_ISSUE_LEN];
@@ -56,7 +56,7 @@ static void test_bad_firing_order_is_reported(void) {
 
 static void test_validate_prints_the_same_messages(void) {
   EngineConfig cfg = engine_config_default();
-  cfg.map_tau_s = -2.0;
+  cfg.intake.plenum_vol_m3 = -2.0;
 
   FILE *f = fopen(TMP_PATH, "w");
   CHECK(f != NULL);
@@ -73,7 +73,7 @@ static void test_validate_prints_the_same_messages(void) {
     CHECK(fgets(line, sizeof line, f) != NULL);
     fclose(f);
   }
-  CHECK(strstr(line, "map_tau_s = -2: must be positive") != NULL);
+  CHECK(strstr(line, "plenum_vol_m3 = -2: must be positive") != NULL);
   CHECK(line[strlen(line) - 1] == '\n');
   remove(TMP_PATH);
 }

@@ -46,8 +46,11 @@ static ModelState idle_at(double target_rpm, double load_nm, double seconds) {
 /* ---- the governor, through the whole system ---- */
 
 static void test_governor_holds_the_target(void) {
+  /* load lowered from 4 to 2 (Phase 5): the real throttle-plate curve needs
+   * more throttle per rpm near idle than the old linear MAP interpolation
+   * did, so the top target (1100) otherwise leaves no authority margin. */
   for (double target = 700.0; target <= 1100.0; target += 200.0) {
-    ModelState st = idle_at(target, 4.0, 40.0);
+    ModelState st = idle_at(target, 2.0, 40.0);
     CHECK(st.engine.run_state == ENGINE_RUNNING);
     CHECK_NEAR(st.rpm, target, 20.0);
     CHECK(st.ecu.idle_throttle > 0.0);
@@ -84,11 +87,15 @@ static void test_governor_recovers_from_a_load_step(void) {
 }
 
 /* Authority is finite: an overload leaves RPM below the target with the
- * governor pinned; when it goes away there is no big overshoot (anti-windup). */
+ * governor pinned; when it goes away there is no big overshoot (anti-windup).
+ * Loads recalibrated for Phase 5: the real throttle-plate model delivers much
+ * more torque per unit of governor throttle near idle than the old fixed
+ * linear MAP interpolation did, so it takes a much bigger overload to
+ * actually saturate the governor's 0.15 authority now. */
 static void test_governor_authority_limit_and_no_windup(void) {
   ModelSync s = make_sync(1, 800.0);
   ModelState st = make_state(&s);
-  run(&s, &st, 0.0, 12.0, 30.0);
+  run(&s, &st, 0.0, 25.0, 30.0);
   CHECK(st.engine.run_state == ENGINE_RUNNING);
   CHECK(st.rpm < 750.0);
   CHECK(st.ecu.idle_mode == ECU_IDLE_LIMITED);
@@ -97,7 +104,7 @@ static void test_governor_authority_limit_and_no_windup(void) {
 
   double peak = 0.0;
   for (int i = 0; i < 1000; i++) { /* 20 s */
-    run(&s, &st, 0.0, 4.0, 0.02);
+    run(&s, &st, 0.0, 10.0, 0.02);
     peak = st.rpm > peak ? st.rpm : peak;
   }
   CHECK(peak < 1000.0);
@@ -183,13 +190,13 @@ static void test_governor_can_be_toggled_during_a_run(void) {
 static void test_engine_only_sees_the_throttle_it_is_given(void) {
   ModelSync s = make_sync(1, 800.0);
   ModelState st = make_state(&s);
-  run(&s, &st, 0.0, 4.0, 60.0);
+  run(&s, &st, 0.0, 6.0, 60.0); /* load raised from 4 to clear 0.05 (Phase 5) */
   const double command = st.ecu.throttle_cmd;
   CHECK(command > 0.05);
 
   ModelSync p = make_sync(0, 800.0); /* no ECU: the pilot holds `command` */
   ModelState sp = make_state(&p);
-  run(&p, &sp, command, 4.0, 60.0);
+  run(&p, &sp, command, 6.0, 60.0);
   CHECK_NEAR(sp.rpm, st.rpm, 15.0);
   CHECK_NEAR(sp.engine.map_kpa, st.engine.map_kpa, 2.0);
 }

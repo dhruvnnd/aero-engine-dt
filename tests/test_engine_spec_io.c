@@ -25,7 +25,7 @@ static void test_save_then_load_round_trips(void) {
     cfg.firing_order[i] = order[i];
   }
   cfg.inertia_kg_m2 = 0.9;
-  cfg.map_tau_s = 0.31;
+  cfg.intake.plenum_vol_m3 = 0.0031;
   cfg.friction_coeff_nm_per_rad_s = 0.17;
 
   CHECK(engine_spec_save(TMP_PATH, &cfg) == 0);
@@ -40,7 +40,7 @@ static void test_save_then_load_round_trips(void) {
     CHECK(loaded.firing_order[i] == cfg.firing_order[i]);
   }
   CHECK_NEAR(loaded.inertia_kg_m2, cfg.inertia_kg_m2, 1e-9);
-  CHECK_NEAR(loaded.map_tau_s, cfg.map_tau_s, 1e-9);
+  CHECK_NEAR(loaded.intake.plenum_vol_m3, cfg.intake.plenum_vol_m3, 1e-9);
   CHECK_NEAR(loaded.friction_coeff_nm_per_rad_s,
              cfg.friction_coeff_nm_per_rad_s, 1e-9);
 
@@ -268,7 +268,7 @@ static void test_missing_keys_fall_back_to_default(void) {
 
   CHECK_NEAR(loaded.inertia_kg_m2, 0.95, 1e-9);
   CHECK(loaded.num_cylinders == defaults.num_cylinders);
-  CHECK_NEAR(loaded.map_tau_s, defaults.map_tau_s, 1e-9);
+  CHECK_NEAR(loaded.intake.plenum_vol_m3, defaults.intake.plenum_vol_m3, 1e-9);
   CHECK_NEAR(loaded.friction_coeff_nm_per_rad_s,
              defaults.friction_coeff_nm_per_rad_s, 1e-9);
 
@@ -347,7 +347,7 @@ static void test_validate_flags_bad_firing_order(void) {
 static void test_validate_flags_non_positive_fields(void) {
   EngineConfig cfg = engine_config_default();
   cfg.inertia_kg_m2 = 0.0;
-  cfg.map_tau_s = -1.0;
+  cfg.intake.plenum_vol_m3 = -1.0;
   CHECK(engine_config_validate(&cfg, NULL) >= 2);
 }
 

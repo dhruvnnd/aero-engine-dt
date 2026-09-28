@@ -30,6 +30,7 @@ set(ENGINE_CORE_TESTS
   test_crank_thermo
   test_engine_trace
   test_propeller
+  test_intake
   test_ecu
   test_ecu_trends
   test_ecu_integration

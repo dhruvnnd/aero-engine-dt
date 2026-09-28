@@ -67,6 +67,12 @@ double spark_advance_curve(double rpm, double map_kpa,
 double volumetric_efficiency(double rpm, double map_kpa,
                              const EngineGeometry *geom);
 
+/* Cylinder induction air mass flow for the whole engine, kg/s */
+double engine_induction_air_flow_kg_s(double rpm, double map_kpa,
+                                      double intake_temp_c,
+                                      const EngineGeometry *geom,
+                                      double total_displacement_m3);
+
 /* Gas-pressure torque at crank angle theta_deg given the cylinder's current
  * pressure, N*m */
 double cylinder_gas_torque_nm(double theta_deg, double pressure_kpa,

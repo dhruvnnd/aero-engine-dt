@@ -109,9 +109,9 @@ static void test_range_bounds_are_enforced_per_field(void) {
 
 static void test_range_messages_read_naturally(void) {
   char m[ENGINE_CONFIG_ISSUE_LEN];
-  engine_config_field_range_message(engine_config_find_field("map_tau_s"), -2.0,
-                                    m, sizeof m);
-  CHECK(strcmp(m, "map_tau_s = -2: must be positive") == 0);
+  engine_config_field_range_message(
+      engine_config_find_field("plenum_vol_m3"), -2.0, m, sizeof m);
+  CHECK(strcmp(m, "plenum_vol_m3 = -2: must be positive") == 0);
 
   engine_config_field_range_message(
       engine_config_find_field("compression_ratio"), 0.5, m, sizeof m);

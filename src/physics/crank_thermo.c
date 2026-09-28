@@ -228,6 +228,18 @@ double volumetric_efficiency(double rpm, double map_kpa,
   return ve;
 }
 
+double engine_induction_air_flow_kg_s(double rpm, double map_kpa,
+                                      double intake_temp_c,
+                                      const EngineGeometry *geom,
+                                      double total_displacement_m3) {
+  const double r_air_j_per_kgk = 287.05;
+  double rho_kg_m3 = kpa_to_pa(map_kpa) /
+                     (r_air_j_per_kgk * celsius_to_kelvin(intake_temp_c));
+  double ve = volumetric_efficiency(rpm, map_kpa, geom);
+  double vol_flow_m3_s = ve * total_displacement_m3 * (rpm / 60.0) / 2.0;
+  return rho_kg_m3 * vol_flow_m3_s;
+}
+
 double cylinder_gas_torque_nm(double theta_deg, double pressure_kpa,
                               const EngineGeometry *geom) {
   return kpa_to_pa(pressure_kpa) * cylinder_dvolume_drad(theta_deg, geom);

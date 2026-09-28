@@ -140,6 +140,25 @@ static void test_volumetric_efficiency_peaks_and_falls_off(void) {
   CHECK_NEAR(same_rpm_low_map, same_rpm_high_map, 1e-12);
 }
 
+/* Shared induction mass-flow helper (fuel.c and the Phase 5 intake plenum
+ * balance): scales with MAP (density) and with RPM (swept volume rate). */
+static void test_induction_air_flow_scales_with_map_and_rpm(void) {
+  EngineGeometry g = engine_geometry_default();
+  const double vd = 0.002; /* m^3, ~2 L total */
+
+  double lo_map = engine_induction_air_flow_kg_s(2000.0, 30.0, 15.0, &g, vd);
+  double hi_map = engine_induction_air_flow_kg_s(2000.0, 90.0, 15.0, &g, vd);
+  CHECK(lo_map > 0.0);
+  CHECK_NEAR(hi_map / lo_map, 90.0 / 30.0, 1e-9); /* rho ~ map at fixed VE */
+
+  double lo_rpm = engine_induction_air_flow_kg_s(1000.0, 90.0, 15.0, &g, vd);
+  double hi_rpm = engine_induction_air_flow_kg_s(2000.0, 90.0, 15.0, &g, vd);
+  CHECK(hi_rpm > lo_rpm);
+
+  CHECK_NEAR(engine_induction_air_flow_kg_s(0.0, 90.0, 15.0, &g, vd), 0.0,
+             1e-12);
+}
+
 /* Gas torque must vanish at TDC/BDC (dV/dtheta = 0 there) regardless of
  * pressure, and be positive during expansion just after TDC firing (theta
  * just above 0) at a plausible post-combustion pressure. */
@@ -314,6 +333,8 @@ static const TestCase CASES[] = {
      test_spark_advance_increases_with_rpm_decreases_with_map},
     {"crank_thermo.volumetric_efficiency_peaks_and_falls_off",
      test_volumetric_efficiency_peaks_and_falls_off},
+    {"crank_thermo.induction_air_flow_scales_with_map_and_rpm",
+     test_induction_air_flow_scales_with_map_and_rpm},
     {"crank_thermo.gas_torque_zero_at_dead_centers",
      test_gas_torque_zero_at_dead_centers},
     {"crank_thermo.inertia_torque_zero_at_dead_centers_and_zero_mean",

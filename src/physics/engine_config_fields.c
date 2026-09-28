@@ -10,11 +10,12 @@ const ConfigGroup ENGINE_CONFIG_GROUPS[] = {
     {"Propeller", 0},
     {"ECU", 0},
     {"Combustion", 1},
+    {"Intake", 0},
 };
 const int ENGINE_CONFIG_GROUP_COUNT =
     (int)(sizeof ENGINE_CONFIG_GROUPS / sizeof ENGINE_CONFIG_GROUPS[0]);
 
-enum { G_DYN = 0, G_GEOM = 1, G_PROP = 2, G_ECU = 3, G_COMB = 4 };
+enum { G_DYN = 0, G_GEOM = 1, G_PROP = 2, G_ECU = 3, G_COMB = 4, G_INTAKE = 5 };
 _Static_assert(G_ECU == ENGINE_CONFIG_GROUP_ECU,
                "ENGINE_CONFIG_GROUP_ECU must match the ECU group's index");
 
@@ -33,10 +34,6 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      "Effective rotating inertia of crank + flywheel + prop (the prop's\n"
      "aerodynamic load is separate, see the propeller group).\n"
      "Typical range for a small 4-cyl aero piston engine: 0.3 - 1.0."},
-    {"map_tau_s", "MAP time constant", "s", G_DYN, OFF(map_tau_s), POS_EXCL,
-     0.1, 0.4, 0.02, 1.0, "%.3f", 1.0, "s",
-     "Manifold filling time constant -- how fast MAP chases its\n"
-     "throttle target. Typical range: 0.1 - 0.4."},
     {"friction_coeff_nm_per_rad_s", "viscous friction", "N*m/(rad/s)", G_DYN,
      OFF(friction_coeff_nm_per_rad_s), POS_EXCL, 0.005, 0.05, 0.001, 0.5,
      "%.4f", 1.0, "N*m/(rad/s)",
@@ -263,6 +260,29 @@ const ConfigField ENGINE_CONFIG_FIELDS[] = {
      "this spread). Wide by real-engine standards, again to keep the idle\n"
      "governor's thin authority margin intact -- see ve_min. Typical\n"
      "range: 1500 - 3000."},
+
+    /* ---- intake plenum (Phase 5) ---- */
+    {"plenum_vol_m3", "plenum volume", "m^3", G_INTAKE,
+     OFF(intake.plenum_vol_m3), POS_EXCL, 0.0015, 0.004, 0.0002, 0.02, "%.5f",
+     1000.0, "L",
+     "Throttle body + manifold volume upstream of the intake ports. Sets\n"
+     "how fast MAP responds to a throttle change: bigger fills/empties\n"
+     "slower. Typical range for a small 4-cyl: 0.0015 - 0.004 (1.5 - 4 L)."},
+    {"throttle_bore_m", "throttle bore", "m", G_INTAKE,
+     OFF(intake.throttle_bore_m), POS_EXCL, 0.05, 0.08, 0.02, 0.12, "%.4f",
+     1000.0, "mm",
+     "Throttle plate diameter at full open. Sets how much MAP can lag\n"
+     "ambient at high air demand. Typical range: 0.05 - 0.08."},
+    {"throttle_leak_frac", "throttle leak", "", G_INTAKE,
+     OFF(intake.throttle_leak_frac), NON_NEG, 0.01, 0.05, 0.0, 0.2, "%.3f",
+     1.0, "",
+     "Flow area still open at closed throttle (idle bypass, imperfect\n"
+     "seal), as a fraction of the full-open area -- this is what lets an\n"
+     "idling engine breathe at all. Typical range: 0.01 - 0.05."},
+    {"throttle_cd", "throttle discharge coeff", "", G_INTAKE,
+     OFF(intake.throttle_cd), POS_EXCL, 0.7, 0.9, 0.3, 1.0, "%.3f", 1.0, "",
+     "Discharge coefficient of the throttle-plate orifice flow equation.\n"
+     "Typical range: 0.7 - 0.9."},
 };
 const int ENGINE_CONFIG_FIELD_COUNT =
     (int)(sizeof ENGINE_CONFIG_FIELDS / sizeof ENGINE_CONFIG_FIELDS[0]);
