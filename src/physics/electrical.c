@@ -4,8 +4,8 @@ ElecConfig elec_config_default(void) {
   ElecConfig c;
   c.bus_nominal_v = 14.2;
   c.alt_rated_a = 40.0;
-  c.alt_cutin_rpm = 800.0;
-  c.alt_full_output_rpm = 1800.0;
+  c.alt_cutin_rpm = 400.0;
+  c.alt_full_output_rpm = 900.0;
   c.alt_health = 1.0;
   c.load_base_a = 15.0;
   c.batt_capacity_ah = 15.0;
@@ -48,6 +48,7 @@ void elec_step(ElecState *state, const ElecConfig *config, double rpm,
 
   double batt_i_a; /* + discharging, - charging */
   double alt_out_a;
+  double ocv = config->batt_open_v * (0.92 + 0.08 * state->batt_soc);
 
   if (alt_cap_a >= load_a) {
     /* Alternator carries the load and tops up the battery, tapered. */
@@ -60,11 +61,15 @@ void elec_step(ElecState *state, const ElecConfig *config, double rpm,
     alt_out_a = load_a + charge_a;
     state->bus_v = config->bus_nominal_v;
   } else {
-    /* Shortfall comes off the battery. */
     batt_i_a = load_a - alt_cap_a;
     alt_out_a = alt_cap_a;
-    double ocv = config->batt_open_v * (0.92 + 0.08 * state->batt_soc);
-    state->bus_v = ocv - batt_i_a * config->batt_internal_r_ohm;
+    double battery_alone_v = ocv - load_a * config->batt_internal_r_ohm;
+    if (battery_alone_v < 0.0) {
+      battery_alone_v = 0.0;
+    }
+    double coverage = load_a > 0.0 ? alt_cap_a / load_a : 1.0;
+    state->bus_v =
+        battery_alone_v + coverage * (config->bus_nominal_v - battery_alone_v);
     if (state->bus_v < 0.0) {
       state->bus_v = 0.0;
     }

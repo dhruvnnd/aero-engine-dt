@@ -35,10 +35,50 @@ static void test_alt_output_rises_with_rpm(void) {
   ElecState below, above;
   elec_state_init(&below);
   elec_state_init(&above);
-  elec_step(&below, &c, 700.0, 0, 0.01);  /* under cut-in */
+  elec_step(&below, &c, 200.0, 0, 0.01);  /* under cut-in */
   elec_step(&above, &c, 2000.0, 0, 0.01); /* over full output */
+  CHECK_NEAR(below.alt_current_a, 0.0, 1e-9);
   CHECK(below.alt_current_a < above.alt_current_a);
   CHECK(above.alt_current_a >= c.load_base_a); /* at least carrying the load */
+}
+
+/* The alternator, not the battery, carries idle's base load: a governed idle
+ * (~800 rpm) sits well above alt_full_output_rpm, so the bus should be flat-
+ * regulated and the battery untouched, not sagging on its own terminal
+ * voltage the whole time the engine idles. */
+static void test_idle_does_not_run_on_the_battery(void) {
+  ElecConfig c = elec_config_default();
+  ElecState s;
+  elec_state_init(&s);
+  for (int i = 0; i < 6000; i++) { /* 60 s at a typical governed idle */
+    elec_step(&s, &c, 800.0, 0, 0.01);
+  }
+  CHECK_NEAR(s.bus_v, c.bus_nominal_v, 1e-6);
+  CHECK_NEAR(s.batt_soc, 1.0, 1e-9); /* not discharging */
+  CHECK(s.alt_current_a >= c.load_base_a);
+}
+
+/* The old model snapped straight from the battery's own terminal voltage to
+ * the regulated bus the instant alt_cap_a crossed load_base_a. Bus voltage
+ * should now rise smoothly across that crossover, not jump. */
+static void test_bus_voltage_is_continuous_across_the_alternator_crossover(
+    void) {
+  ElecConfig c = elec_config_default();
+  double prev = -1.0;
+  for (double rpm = 0.0; rpm <= 1000.0; rpm += 5.0) {
+    ElecState s;
+    elec_state_init(&s);
+    elec_step(&s, &c, rpm, 0, 0.01);
+    if (prev >= 0.0) {
+      /* the ramp's own slope is a few hundredths of a volt per rpm; 0.2
+       * leaves ample margin over that while still catching the old ~1.7 V
+       * one-step jump this replaced */
+      CHECK(s.bus_v - prev < 0.2);
+    }
+    CHECK(s.bus_v >= prev - 1e-9); /* monotonically rising */
+    prev = s.bus_v;
+  }
+  CHECK_NEAR(prev, c.bus_nominal_v, 1e-6); /* settles on the regulated bus */
 }
 
 static void test_bus_regulated_at_cruise(void) {
@@ -107,6 +147,10 @@ static void test_model_wires_electrical(void) {
 static const TestCase CASES[] = {
     {"elec.config_and_init", test_config_and_init},
     {"elec.alt_output_rises_with_rpm", test_alt_output_rises_with_rpm},
+    {"elec.idle_does_not_run_on_the_battery",
+     test_idle_does_not_run_on_the_battery},
+    {"elec.bus_voltage_is_continuous_across_the_alternator_crossover",
+     test_bus_voltage_is_continuous_across_the_alternator_crossover},
     {"elec.bus_regulated_at_cruise", test_bus_regulated_at_cruise},
     {"elec.alternator_failure_drains_battery",
      test_alternator_failure_drains_battery},
