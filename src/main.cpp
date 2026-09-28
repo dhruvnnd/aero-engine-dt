@@ -27,6 +27,7 @@
 #include "telemetry/ecu_trends.h"
 #include "telemetry/engine_faults.h"
 #include "telemetry/event_log.h"
+#include "telemetry/intake_trends.h"
 #include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
 #include "telemetry/trends.h"
@@ -44,6 +45,7 @@
 #include "ui/event_log_panel.h"
 #include "ui/faults_panel.h"
 #include "ui/gamepad_panel.h"
+#include "ui/intake_panel.h"
 #include "ui/layouts.h"
 #include "ui/readout_panels.h"
 #include "ui/spec_editor_panel.h"
@@ -102,6 +104,7 @@ typedef struct {
   EngineFaultTracker
       engine_faults;    /* injected cylinder faults vs the monitors */
   EcuTrends ecu_trends; /* idle-governor loop history for the ECU panel */
+  IntakeTrends intake_trends; /* plenum mass-balance history for the Intake panel */
   EcuIdleMode
       logged_ecu_mode; /* governor mode last checked for event-log lines */
   int logged_dtc_active[ECU_DTC_COUNT]; /* fault codes last written to log */
@@ -407,6 +410,7 @@ static void reset_simulation_state(AppState *app) {
   trends_init(&app->trends);
   cyl_trends_init(&app->cyl_trends);
   ecu_trends_init(&app->ecu_trends);
+  intake_trends_init(&app->intake_trends);
   ecu_compare_init(&app->ecu_compare_trends);
   engine_faults_init(&app->engine_faults);
   app->logged_ecu_mode = app->state.ecu.idle_mode;
@@ -804,6 +808,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     ecu_trends_sample(&app->ecu_trends,
                       &app->state); /* the ECU's own numbers
                                      * are exact, not sensed */
+    intake_trends_sample(&app->intake_trends, &app->state,
+                        &app->sync.engine_config);
     engine_faults_update(&app->engine_faults, app->sync.cyl_config, &app->state,
                          app->sync.engine_config.num_cylinders,
                          app->sync.sim_time_s);
@@ -935,6 +941,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         ImGui::MenuItem("Trends", NULL, &app->panels.trends);
         ImGui::MenuItem("Cylinder Trends", NULL, &app->panels.cyl_trends);
         ImGui::MenuItem("Torque Ripple", NULL, &app->panels.torque_trace);
+        ImGui::MenuItem("Intake", NULL, &app->panels.intake);
         ImGui::EndMenu();
       }
       ImGui::Separator();
@@ -1091,6 +1098,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   if (app->panels.torque_trace) {
     torque_trace_panel_draw(&app->panels.torque_trace, &app->engine_trace,
                             &app->sync.engine_config);
+  }
+  if (app->panels.intake) {
+    intake_panel_draw(&app->panels.intake, &app->intake_trends,
+                      &app->sync.engine_config, SAMPLE_PERIOD_S);
   }
   if (app->panels.event_log) {
     event_log_panel_draw(&app->panels.event_log, &app->events);

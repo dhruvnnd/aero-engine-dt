@@ -27,6 +27,7 @@ static const PanelFlagEntry kPanelFlags[] = {
     {"trends", offsetof(PanelVisibility, trends)},
     {"cyl_trends", offsetof(PanelVisibility, cyl_trends)},
     {"torque_trace", offsetof(PanelVisibility, torque_trace)},
+    {"intake", offsetof(PanelVisibility, intake)},
     {"ecu", offsetof(PanelVisibility, ecu)},
     {"ecu_trends", offsetof(PanelVisibility, ecu_trends)},
     {"ecu_io", offsetof(PanelVisibility, ecu_io)},

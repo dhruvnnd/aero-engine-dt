@@ -13,6 +13,7 @@ struct PanelVisibility {
   bool trends;
   bool cyl_trends;
   bool torque_trace;
+  bool intake;
   bool ecu;
   bool ecu_trends;
   bool ecu_io;
