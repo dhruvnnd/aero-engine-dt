@@ -169,7 +169,25 @@ target_compile_options(aero_engine_dt PRIVATE
 
 if(WIN32)
   target_link_options(aero_engine_dt PRIVATE $<$<CONFIG:Release>:-mwindows>)
+
+  # Embed the .exe icon (Explorer / taskbar pin / Alt-Tab) via a Windows
+  # resource script. windres resolves the .ico path in app.rc against -I dirs,
+  # so point it at assets/.
+  enable_language(RC)
+  set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I\"${CMAKE_SOURCE_DIR}/assets\"")
+  target_sources(aero_engine_dt PRIVATE "${CMAKE_SOURCE_DIR}/assets/app.rc")
+  set_source_files_properties("${CMAKE_SOURCE_DIR}/assets/app.rc"
+    PROPERTIES OBJECT_DEPENDS "${CMAKE_SOURCE_DIR}/assets/icons/aero_engine_dt.ico")
 endif()
+
+# Runtime window icon: sdl_window.c loads assets/icons/aero_engine_dt.png
+# relative to the exe, so ship it alongside the binary.
+add_custom_command(TARGET aero_engine_dt POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/assets/icons/aero_engine_dt.png"
+          "$<TARGET_FILE_DIR:aero_engine_dt>/assets/icons/aero_engine_dt.png"
+  COMMENT "Copying window icon next to the executable"
+)
 
 # Vendored builds ship a DLL that has to sit next to the exe at runtime.
 if(WIN32 AND DEFINED SDL3_DLL)

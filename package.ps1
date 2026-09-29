@@ -57,6 +57,10 @@ Copy-Item (Join-Path $BuildDir "twin_sim.exe") $StageDir -ErrorAction SilentlyCo
 Copy-Item (Join-Path $BuildDir "twin_config.exe") $StageDir -ErrorAction SilentlyContinue
 Copy-Item $SyncExePath $StageDir
 Copy-Item (Join-Path $RepoRoot "configs") $StageDir -Recurse
+# Runtime window icon (loaded from <exe dir>/assets/icons by sdl_window.c)
+$IconDir = Join-Path $StageDir "assets\icons"
+New-Item -ItemType Directory -Force -Path $IconDir | Out-Null
+Copy-Item (Join-Path $RepoRoot "assets\icons\aero_engine_dt.png") $IconDir
 
 @"
 aero engine digital twin -- v$Version
