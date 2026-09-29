@@ -158,7 +158,25 @@ list(APPEND APP_SOURCES "${CMAKE_SOURCE_DIR}/src/main.cpp")
 add_executable(aero_engine_dt ${APP_SOURCES})
 
 target_include_directories(aero_engine_dt PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_compile_definitions(aero_engine_dt PRIVATE AERO_VERSION="${PROJECT_VERSION}")
+# Build metadata shown in the About panel. The git commit/branch/dirty state
+# is regenerated on *every* build (not just at configure time) into
+# <build>/generated/build_info.h; the file only changes when the state does.
+set(AERO_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+add_custom_target(git_info ALL
+  COMMAND ${CMAKE_COMMAND}
+          -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DOUT_FILE=${AERO_GENERATED_DIR}/build_info.h
+          -P ${CMAKE_SOURCE_DIR}/cmake/GitInfo.cmake
+  BYPRODUCTS ${AERO_GENERATED_DIR}/build_info.h
+  COMMENT "Updating build_info.h (git state)"
+  VERBATIM
+)
+add_dependencies(aero_engine_dt git_info)
+target_include_directories(aero_engine_dt PRIVATE ${AERO_GENERATED_DIR})
+target_compile_definitions(aero_engine_dt PRIVATE
+  AERO_VERSION="${PROJECT_VERSION}"
+  AERO_BUILD_TYPE="$<CONFIG>"
+)
 target_link_libraries(aero_engine_dt PRIVATE engine_core imgui implot SDL3::SDL3)
 
 target_compile_options(aero_engine_dt PRIVATE

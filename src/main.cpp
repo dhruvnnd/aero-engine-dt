@@ -31,6 +31,7 @@
 #include "telemetry/monitor.h"
 #include "telemetry/sensor.h"
 #include "telemetry/trends.h"
+#include "ui/about_panel.h"
 #include "ui/alarm_strip.h"
 #include "ui/controls_panel.h"
 #include "ui/custom_layouts.h"
@@ -77,6 +78,7 @@ typedef struct {
   bool layout_checked;    /* first-frame default-layout check done */
   bool show_implot_demo;
   bool show_imgui_demo;
+  bool show_about;
   bool quit_requested;
   SdlFrameTimer timer;
 
@@ -569,6 +571,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   app->panels = layout_visibility(LAYOUT_OVERVIEW);
   app->show_implot_demo = false;
   app->show_imgui_demo = false;
+  app->show_about = false;
 
   custom_layouts_load(&app->custom_layouts);
   app->custom_layout_active = -1;
@@ -973,6 +976,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::MenuItem("ImPlot demo", NULL, &app->show_implot_demo);
       ImGui::EndMenu();
     }
+    if (ImGui::BeginMenu("Help")) {
+      ImGui::MenuItem("About", NULL, &app->show_about);
+      ImGui::EndMenu();
+    }
     if (run_recorder_active(&app->recorder)) {
       ImGui::TextColored(ImVec4(0.90f, 0.22f, 0.20f, 1.0f), "  REC %ld",
                          app->recorder.rows);
@@ -1108,6 +1115,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   }
   if (app->panels.gamepad) {
     gamepad_panel_draw(&app->panels.gamepad, &app->input);
+  }
+  if (app->show_about) {
+    about_panel_draw(&app->show_about, app->window_ctx.window,
+                     app->window_ctx.renderer);
   }
   if (app->show_imgui_demo) {
     ImGui::ShowDemoWindow(&app->show_imgui_demo);

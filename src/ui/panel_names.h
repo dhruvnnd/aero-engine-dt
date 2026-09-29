@@ -25,5 +25,6 @@
 #define PANEL_ENGINE_FAULTS "Engine Faults"
 #define PANEL_EVENT_LOG "Event Log"
 #define PANEL_GAMEPAD "Gamepad / Input Map"
+#define PANEL_ABOUT "About"
 
 #endif /* UI_PANEL_NAMES_H */
