@@ -17,6 +17,7 @@
 #define PANEL_CYL_TRENDS "Cylinder Trends"
 #define PANEL_TORQUE_TRACE "Torque Ripple"
 #define PANEL_INTAKE "Intake"
+#define PANEL_PV_DIAGRAM "P-V Diagram"
 #define PANEL_ECU "ECU"
 #define PANEL_ECU_TRENDS "ECU Trends"
 #define PANEL_ECU_IO "ECU I/O"

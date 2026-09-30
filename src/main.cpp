@@ -48,6 +48,7 @@
 #include "ui/gamepad_panel.h"
 #include "ui/intake_panel.h"
 #include "ui/layouts.h"
+#include "ui/pv_diagram_panel.h"
 #include "ui/readout_panels.h"
 #include "ui/spec_editor_panel.h"
 #include "ui/torque_trace_panel.h"
@@ -944,6 +945,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         ImGui::MenuItem("Trends", NULL, &app->panels.trends);
         ImGui::MenuItem("Cylinder Trends", NULL, &app->panels.cyl_trends);
         ImGui::MenuItem("Torque Ripple", NULL, &app->panels.torque_trace);
+        ImGui::MenuItem("P-V Diagram", NULL, &app->panels.pv_diagram);
         ImGui::MenuItem("Intake", NULL, &app->panels.intake);
         ImGui::EndMenu();
       }
@@ -1105,6 +1107,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   if (app->panels.torque_trace) {
     torque_trace_panel_draw(&app->panels.torque_trace, &app->engine_trace,
                             &app->sync.engine_config);
+  }
+  if (app->panels.pv_diagram) {
+    pv_diagram_panel_draw(&app->panels.pv_diagram, &app->engine_trace,
+                          &app->sync.engine_config, app->sync.cyl_config);
   }
   if (app->panels.intake) {
     intake_panel_draw(&app->panels.intake, &app->intake_trends,
