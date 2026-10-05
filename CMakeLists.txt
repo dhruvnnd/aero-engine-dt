@@ -207,6 +207,14 @@ add_custom_command(TARGET aero_engine_dt POST_BUILD
   COMMENT "Copying window icon next to the executable"
 )
 
+# UI fonts: main.cpp loads the TTFs in assets/fonts/ relative to the exe.
+add_custom_command(TARGET aero_engine_dt POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_SOURCE_DIR}/assets/fonts"
+          "$<TARGET_FILE_DIR:aero_engine_dt>/assets/fonts"
+  COMMENT "Copying UI fonts next to the executable"
+)
+
 # Vendored builds ship a DLL that has to sit next to the exe at runtime.
 if(WIN32 AND DEFINED SDL3_DLL)
   add_custom_command(TARGET aero_engine_dt POST_BUILD

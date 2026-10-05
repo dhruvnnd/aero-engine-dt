@@ -52,11 +52,11 @@
 #include "ui/profiler_panel.h"
 #include "ui/pv_diagram_panel.h"
 #include "ui/readout_panels.h"
-#include "util/profiler.h"
 #include "ui/spec_editor_panel.h"
 #include "ui/torque_trace_panel.h"
 #include "ui/trends_panel.h"
 #include "ui/ve_curve_panel.h"
+#include "util/profiler.h"
 
 /* Initial window size; shrunk to fit the display if it is too big. */
 #define WIN_W 1680
@@ -117,14 +117,18 @@ enum ProfStage {
 };
 
 static const char *const kStageNames[PS_COUNT] = {
-    "Input & timing", "Physics", "Shadow model", "Telemetry", "UI build",
-    "Render", "Present (vsync)", "Menu bar", PANEL_ALARMS, PANEL_SIM,
-    PANEL_ENGINE_SPEC, PANEL_VE_CURVE, PANEL_SPEC_EDITOR, PANEL_CONTROLS,
-    PANEL_FAULTS, PANEL_INSTRUMENTS, PANEL_ENVIRONMENT, PANEL_CYLINDERS,
-    PANEL_TRENDS, PANEL_CYL_TRENDS, PANEL_ECU, PANEL_ENGINE_FAULTS,
-    PANEL_ECU_IO, PANEL_ECU_FAULTS, PANEL_ECU_COMPARE, PANEL_ECU_TRENDS,
-    PANEL_TORQUE_TRACE, PANEL_PV_DIAGRAM, PANEL_INTAKE, PANEL_EVENT_LOG,
-    PANEL_GAMEPAD, PANEL_ABOUT, "ImGui / ImPlot demos", PANEL_PROFILER};
+    "Input & timing",    "Physics",         "Shadow model",
+    "Telemetry",         "UI build",        "Render",
+    "Present (vsync)",   "Menu bar",        PANEL_ALARMS,
+    PANEL_SIM,           PANEL_ENGINE_SPEC, PANEL_VE_CURVE,
+    PANEL_SPEC_EDITOR,   PANEL_CONTROLS,    PANEL_FAULTS,
+    PANEL_INSTRUMENTS,   PANEL_ENVIRONMENT, PANEL_CYLINDERS,
+    PANEL_TRENDS,        PANEL_CYL_TRENDS,  PANEL_ECU,
+    PANEL_ENGINE_FAULTS, PANEL_ECU_IO,      PANEL_ECU_FAULTS,
+    PANEL_ECU_COMPARE,   PANEL_ECU_TRENDS,  PANEL_TORQUE_TRACE,
+    PANEL_PV_DIAGRAM,    PANEL_INTAKE,      PANEL_EVENT_LOG,
+    PANEL_GAMEPAD,       PANEL_ABOUT,       "ImGui / ImPlot demos",
+    PANEL_PROFILER};
 
 enum ProfCounter { PC_STEPS, PC_SUBSTEPS, PC_SHADOW_STEPS, PC_SIM_S };
 
@@ -163,7 +167,22 @@ static double display_refresh_ms(SDL_Window *window) {
 }
 
 typedef struct {
+  const char *label;
+  const char *file;
+  ImFont *font; /* NULL until loaded (stays NULL for the built-in entry) */
+  bool available;
+} UiFontChoice;
+
+static UiFontChoice g_ui_fonts[] = {
+    {"ProggyForever (Default)", NULL, NULL, true},
+    {"B612 (Airbus)", "B612-Regular.ttf", NULL, false},
+};
+enum { UI_FONT_COUNT = sizeof g_ui_fonts / sizeof g_ui_fonts[0] };
+#define UI_FONT_SIZE 16.0f /* pre-scale; FontScaleMain applies DPI/zoom */
+
+typedef struct {
   SdlWindowContext window_ctx;
+  int ui_font;            /* index into g_ui_fonts */
   PanelVisibility panels; /* which dockable panels are open */
   int layout_current;     /* LAYOUT_* last applied */
   int layout_pending;     /* LAYOUT_* to apply next frame, or -1 */
@@ -200,7 +219,8 @@ typedef struct {
   EngineFaultTracker
       engine_faults;    /* injected cylinder faults vs the monitors */
   EcuTrends ecu_trends; /* idle-governor loop history for the ECU panel */
-  IntakeTrends intake_trends; /* plenum mass-balance history for the Intake panel */
+  IntakeTrends
+      intake_trends; /* plenum mass-balance history for the Intake panel */
   EcuIdleMode
       logged_ecu_mode; /* governor mode last checked for event-log lines */
   int logged_dtc_active[ECU_DTC_COUNT]; /* fault codes last written to log */
@@ -652,6 +672,20 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   io.IniFilename = "aero_engine_dt_imgui.ini";
   ImGui::StyleColorsDark();
+  {
+    g_ui_fonts[0].font = io.Fonts->AddFontDefaultVector();
+    const char *base = SDL_GetBasePath();
+    for (int i = 1; i < UI_FONT_COUNT; i++) {
+      char font_path[1024];
+      SDL_snprintf(font_path, sizeof font_path, "%sassets/fonts/%s",
+                   base ? base : "", g_ui_fonts[i].file);
+      g_ui_fonts[i].font =
+          io.Fonts->AddFontFromFileTTF(font_path, UI_FONT_SIZE);
+      g_ui_fonts[i].available = g_ui_fonts[i].font != NULL;
+    }
+    app->ui_font = 0; /* ProggyForever */
+    io.FontDefault = g_ui_fonts[app->ui_font].font;
+  }
   const float ui_scale =
       SDL_GetWindowDisplayScale(app->window_ctx.window) * UI_ZOOM;
   ImGui::GetStyle().ScaleAllSizes(ui_scale);
@@ -921,7 +955,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                       &app->state); /* the ECU's own numbers
                                      * are exact, not sensed */
     intake_trends_sample(&app->intake_trends, &app->state,
-                        &app->sync.engine_config);
+                         &app->sync.engine_config);
     engine_faults_update(&app->engine_faults, app->sync.cyl_config, &app->state,
                          app->sync.engine_config.num_cylinders,
                          app->sync.sim_time_s);
@@ -1064,6 +1098,17 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       ImGui::Separator();
       ImGui::MenuItem("Event Log", "L", &app->panels.event_log);
       ImGui::MenuItem("Gamepad", "G", &app->panels.gamepad);
+      ImGui::Separator();
+      if (ImGui::BeginMenu("Font")) {
+        for (int i = 0; i < UI_FONT_COUNT; i++) {
+          if (ImGui::MenuItem(g_ui_fonts[i].label, NULL, app->ui_font == i,
+                              g_ui_fonts[i].available)) {
+            app->ui_font = i;
+            ImGui::GetIO().FontDefault = g_ui_fonts[i].font;
+          }
+        }
+        ImGui::EndMenu();
+      }
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("ECU")) {
