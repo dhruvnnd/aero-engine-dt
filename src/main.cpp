@@ -48,8 +48,11 @@
 #include "ui/gamepad_panel.h"
 #include "ui/intake_panel.h"
 #include "ui/layouts.h"
+#include "ui/panel_names.h"
+#include "ui/profiler_panel.h"
 #include "ui/pv_diagram_panel.h"
 #include "ui/readout_panels.h"
+#include "util/profiler.h"
 #include "ui/spec_editor_panel.h"
 #include "ui/torque_trace_panel.h"
 #include "ui/trends_panel.h"
@@ -71,6 +74,94 @@
  * flight condition, applied in model_sync_step(). */
 #define ACCESSORY_LOAD_NM 0.0
 
+/* ---- performance profiler ------------------------------------------------
+ * Top-level stages partition a frame; the per-panel stages after them are
+ * scopes nested inside the UI stage (see ui/profiler_panel.h). */
+enum ProfStage {
+  PS_INPUT,
+  PS_PHYSICS,
+  PS_SHADOW,
+  PS_TELEMETRY,
+  PS_UI,
+  PS_RENDER,
+  PS_PRESENT,
+  PS_FIRST_PANEL,
+  PS_MENU = PS_FIRST_PANEL,
+  PS_ALARMS,
+  PS_SIM,
+  PS_ENGINE_SPEC,
+  PS_VE_CURVE,
+  PS_SPEC_EDITOR,
+  PS_CONTROLS,
+  PS_FAULTS,
+  PS_INSTRUMENTS,
+  PS_ENVIRONMENT,
+  PS_CYLINDERS,
+  PS_TRENDS,
+  PS_CYL_TRENDS,
+  PS_ECU,
+  PS_ENGINE_FAULTS,
+  PS_ECU_IO,
+  PS_ECU_FAULTS,
+  PS_ECU_COMPARE,
+  PS_ECU_TRENDS,
+  PS_TORQUE_TRACE,
+  PS_PV_DIAGRAM,
+  PS_INTAKE,
+  PS_EVENT_LOG,
+  PS_GAMEPAD,
+  PS_ABOUT,
+  PS_DEMOS,
+  PS_PROFILER,
+  PS_COUNT
+};
+
+static const char *const kStageNames[PS_COUNT] = {
+    "Input & timing", "Physics", "Shadow model", "Telemetry", "UI build",
+    "Render", "Present (vsync)", "Menu bar", PANEL_ALARMS, PANEL_SIM,
+    PANEL_ENGINE_SPEC, PANEL_VE_CURVE, PANEL_SPEC_EDITOR, PANEL_CONTROLS,
+    PANEL_FAULTS, PANEL_INSTRUMENTS, PANEL_ENVIRONMENT, PANEL_CYLINDERS,
+    PANEL_TRENDS, PANEL_CYL_TRENDS, PANEL_ECU, PANEL_ENGINE_FAULTS,
+    PANEL_ECU_IO, PANEL_ECU_FAULTS, PANEL_ECU_COMPARE, PANEL_ECU_TRENDS,
+    PANEL_TORQUE_TRACE, PANEL_PV_DIAGRAM, PANEL_INTAKE, PANEL_EVENT_LOG,
+    PANEL_GAMEPAD, PANEL_ABOUT, "ImGui / ImPlot demos", PANEL_PROFILER};
+
+enum ProfCounter { PC_STEPS, PC_SUBSTEPS, PC_SHADOW_STEPS, PC_SIM_S };
+
+static double prof_now() {
+  return (double)SDL_GetPerformanceCounter() /
+         (double)SDL_GetPerformanceFrequency();
+}
+
+static void profiler_setup(Profiler *p) {
+  profiler_init(p);
+  for (int i = 0; i < PS_COUNT; i++) {
+    profiler_add_stage(p, kStageNames[i]);
+  }
+  profiler_add_counter(p, "model_steps");
+  profiler_add_counter(p, "crank_substeps");
+  profiler_add_counter(p, "shadow_steps");
+  profiler_add_counter(p, "sim_s");
+}
+
+/* Times the enclosing block as stage `id`. */
+struct ProfScope {
+  Profiler *p;
+  int id;
+  ProfScope(Profiler *prof, int stage) : p(prof), id(stage) {
+    profiler_begin(p, id, prof_now());
+  }
+  ~ProfScope() { profiler_end(p, id, prof_now()); }
+};
+
+/* Refresh period of the display the window is on, for the profiler frame
+ * budget (0 = unknown). */
+static double display_refresh_ms(SDL_Window *window) {
+  const SDL_DisplayID did = SDL_GetDisplayForWindow(window);
+  const SDL_DisplayMode *dm = did ? SDL_GetCurrentDisplayMode(did) : NULL;
+  return (dm && dm->refresh_rate > 0.0f) ? 1000.0 / dm->refresh_rate : 0.0;
+}
+
 typedef struct {
   SdlWindowContext window_ctx;
   PanelVisibility panels; /* which dockable panels are open */
@@ -80,6 +171,8 @@ typedef struct {
   bool show_implot_demo;
   bool show_imgui_demo;
   bool show_about;
+  bool show_profiler;
+  Profiler profiler; /* per-frame timing for the Performance panel */
   bool quit_requested;
   SdlFrameTimer timer;
 
@@ -573,6 +666,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
   app->show_implot_demo = false;
   app->show_imgui_demo = false;
   app->show_about = false;
+  app->show_profiler = false;
+  profiler_setup(&app->profiler);
 
   custom_layouts_load(&app->custom_layouts);
   app->custom_layout_active = -1;
@@ -721,6 +816,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   AppState *app = (AppState *)appstate;
   SDL_Renderer *renderer = app->window_ctx.renderer;
 
+  profiler_frame_begin(&app->profiler, prof_now());
+  profiler_begin(&app->profiler, PS_INPUT, prof_now());
+
   const float fps = sdl_time_tick(&app->timer);
 
   if (SDL_GetAtomicInt(&g_spec_pending)) {
@@ -735,6 +833,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   }
 
   sdl_input_update(&app->input, dt);
+  profiler_end(&app->profiler, PS_INPUT, prof_now());
 
   EnvInput env_in;
   env_in.altitude_m = app->input.altitude_m;
@@ -751,18 +850,27 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
    * stepped in slices of at most SIM_CLOCK_MAX_STEP_S so fast-forward and slow
    * frames stay numerically tame. */
   const double sim_dt = sim_clock_advance(&app->clock, dt);
+  profiler_count(&app->profiler, PC_SIM_S, sim_dt);
   EngineRunState prev_run_state = app->state.engine.run_state;
   double remaining = sim_dt;
   double h;
   while ((h = sim_clock_take_step(&remaining)) > 0.0) {
+    profiler_begin(&app->profiler, PS_PHYSICS, prof_now());
     model_sync_step(&app->sync, &app->state, &in, &env_in, h);
+    profiler_end(&app->profiler, PS_PHYSICS, prof_now());
+    profiler_count(&app->profiler, PC_STEPS, 1.0);
+    profiler_count(&app->profiler, PC_SUBSTEPS, app->state.engine.substeps);
     if (app->sync.engine_config.ecu_fitted) {
       /* same faults, same inputs, no ECU */
       memcpy(app->shadow_sync.cyl_config, app->sync.cyl_config,
              sizeof app->shadow_sync.cyl_config);
+      profiler_begin(&app->profiler, PS_SHADOW, prof_now());
       model_sync_step(&app->shadow_sync, &app->shadow_state, &in, &env_in, h);
+      profiler_end(&app->profiler, PS_SHADOW, prof_now());
+      profiler_count(&app->profiler, PC_SHADOW_STEPS, 1.0);
     }
   }
+  profiler_begin(&app->profiler, PS_TELEMETRY, prof_now());
   EngineRunState cur_run_state = app->state.engine.run_state;
   if (prev_run_state != ENGINE_STOPPED && cur_run_state == ENGINE_STOPPED) {
     if (app->engine_stop_requested) {
@@ -830,8 +938,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     app->sample_accum_s -= SAMPLE_PERIOD_S;
   }
 
+  profiler_end(&app->profiler, PS_TELEMETRY, prof_now());
+
   const ModelState *shown = app->sensor_mode ? &app->display : &app->state;
 
+  profiler_begin(&app->profiler, PS_UI, prof_now());
   ImGui_ImplSDLRenderer3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
@@ -861,6 +972,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   ImGui::DockSpaceOverViewport(layout_dockspace_id(), ImGui::GetMainViewport(),
                                ImGuiDockNodeFlags_None);
 
+  profiler_begin(&app->profiler, PS_MENU, prof_now());
   if (ImGui::BeginMainMenuBar()) {
     if (ImGui::BeginMenu("File")) {
       const bool recording = run_recorder_active(&app->recorder);
@@ -976,6 +1088,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     if (ImGui::BeginMenu("Debug")) {
       ImGui::MenuItem("ImGui demo", NULL, &app->show_imgui_demo);
       ImGui::MenuItem("ImPlot demo", NULL, &app->show_implot_demo);
+      ImGui::Separator();
+      ImGui::MenuItem("Performance", NULL, &app->show_profiler);
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {
@@ -992,25 +1106,34 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     ImGui::EndMainMenuBar();
   }
   draw_layout_popups(app);
+  profiler_end(&app->profiler, PS_MENU, prof_now());
 
-  if (app->panels.alarms && alarm_strip_draw(&app->panels.alarms, &app->ann)) {
+  profiler_begin(&app->profiler, PS_ALARMS, prof_now());
+  const bool alarms_acked =
+      app->panels.alarms && alarm_strip_draw(&app->panels.alarms, &app->ann);
+  profiler_end(&app->profiler, PS_ALARMS, prof_now());
+  if (alarms_acked) {
     acknowledge_alarms(app);
   }
 
   if (app->panels.sim) {
+    ProfScope prof_scope(&app->profiler, PS_SIM);
     sim_panel_draw(&app->panels.sim, shown, app->sync.sim_time_s,
                    app->input.throttle, fps, app->sensor_mode != 0,
                    &app->clock);
   }
   if (app->panels.engine_spec) {
+    ProfScope prof_scope(&app->profiler, PS_ENGINE_SPEC);
     engine_spec_panel_draw(&app->panels.engine_spec, &app->sync,
                            app->spec_path);
   }
   if (app->panels.ve_curve) {
+    ProfScope prof_scope(&app->profiler, PS_VE_CURVE);
     ve_curve_panel_draw(&app->panels.ve_curve, &app->sync.engine_config,
                         app->state.rpm);
   }
   if (app->panels.spec_editor) {
+    ProfScope prof_scope(&app->profiler, PS_SPEC_EDITOR);
     const SpecEditorResult ed = spec_editor_panel_draw(
         &app->panels.spec_editor, &app->sync.engine_config, app->spec_path,
         app->window_ctx.window, &app->events, app->sync.sim_time_s);
@@ -1019,6 +1142,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
   }
   if (app->panels.controls) {
+    ProfScope prof_scope(&app->profiler, PS_CONTROLS);
     const ControlActions act = controls_panel_draw(
         &app->panels.controls, &app->input, shown, &app->sensor_mode);
     if (act.start_engine) {
@@ -1032,29 +1156,36 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
   }
   if (app->panels.faults) {
+    ProfScope prof_scope(&app->profiler, PS_FAULTS);
     faults_panel_draw(&app->panels.faults, app->sync.cyl_config,
                       app->sync.engine_config.num_cylinders, &app->events,
                       app->sync.sim_time_s);
   }
   if (app->panels.instruments) {
+    ProfScope prof_scope(&app->profiler, PS_INSTRUMENTS);
     instruments_panel_draw(&app->panels.instruments, shown);
   }
   if (app->panels.environment) {
+    ProfScope prof_scope(&app->profiler, PS_ENVIRONMENT);
     environment_panel_draw(&app->panels.environment, shown);
   }
   if (app->panels.cylinders) {
+    ProfScope prof_scope(&app->profiler, PS_CYLINDERS);
     cylinders_panel_draw(&app->panels.cylinders, shown,
                          app->sync.engine_config.num_cylinders);
   }
   if (app->panels.trends) {
+    ProfScope prof_scope(&app->profiler, PS_TRENDS);
     trends_panel_draw(&app->panels.trends, &app->trends, SAMPLE_PERIOD_S);
   }
   if (app->panels.cyl_trends) {
+    ProfScope prof_scope(&app->profiler, PS_CYL_TRENDS);
     cyl_trends_panel_draw(&app->panels.cyl_trends, &app->cyl_trends,
                           app->sync.engine_config.num_cylinders,
                           SAMPLE_PERIOD_S);
   }
   if (app->panels.ecu) {
+    ProfScope prof_scope(&app->profiler, PS_ECU);
     const EcuActions ea =
         ecu_panel_draw(&app->panels.ecu, &app->state, &app->sync.engine_config);
     if (ea.toggle_idle_governor) {
@@ -1062,12 +1193,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
   }
   if (app->panels.engine_faults) {
+    ProfScope prof_scope(&app->profiler, PS_ENGINE_FAULTS);
     engine_faults_panel_draw(&app->panels.engine_faults, app->sync.cyl_config,
                              app->sync.engine_config.num_cylinders, &app->state,
                              &app->engine_trace, &app->engine_faults,
                              app->sync.sim_time_s);
   }
   if (app->panels.ecu_io) {
+    ProfScope prof_scope(&app->profiler, PS_ECU_IO);
     const EcuSensorFault faults[2] = {app->sync.ecu_rpm_fault,
                                       app->sync.ecu_rpm2_fault};
     const EcuIoActions ia =
@@ -1077,6 +1210,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
   }
   if (app->panels.ecu_faults) {
+    ProfScope prof_scope(&app->profiler, PS_ECU_FAULTS);
     const EcuFaultsActions fa =
         ecu_faults_panel_draw(&app->panels.ecu_faults, &app->state);
     if (fa.toggle_diagnostics) {
@@ -1092,6 +1226,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
   }
   if (app->panels.ecu_compare) {
+    ProfScope prof_scope(&app->profiler, PS_ECU_COMPARE);
     if (ecu_compare_panel_draw(&app->panels.ecu_compare, &app->state,
                                &app->shadow_state, &app->ecu_compare_trends,
                                app->sync.engine_config.ecu_fitted != 0,
@@ -1100,37 +1235,66 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     }
   }
   if (app->panels.ecu_trends) {
+    ProfScope prof_scope(&app->profiler, PS_ECU_TRENDS);
     ecu_trends_panel_draw(
         &app->panels.ecu_trends, &app->ecu_trends, &app->sync.engine_config,
         app->sync.engine_config.ecu_fitted != 0, SAMPLE_PERIOD_S);
   }
   if (app->panels.torque_trace) {
+    ProfScope prof_scope(&app->profiler, PS_TORQUE_TRACE);
     torque_trace_panel_draw(&app->panels.torque_trace, &app->engine_trace,
                             &app->sync.engine_config);
   }
   if (app->panels.pv_diagram) {
+    ProfScope prof_scope(&app->profiler, PS_PV_DIAGRAM);
     pv_diagram_panel_draw(&app->panels.pv_diagram, &app->engine_trace,
                           &app->sync.engine_config, app->sync.cyl_config);
   }
   if (app->panels.intake) {
+    ProfScope prof_scope(&app->profiler, PS_INTAKE);
     intake_panel_draw(&app->panels.intake, &app->intake_trends,
                       &app->sync.engine_config, SAMPLE_PERIOD_S);
   }
   if (app->panels.event_log) {
+    ProfScope prof_scope(&app->profiler, PS_EVENT_LOG);
     event_log_panel_draw(&app->panels.event_log, &app->events);
   }
   if (app->panels.gamepad) {
+    ProfScope prof_scope(&app->profiler, PS_GAMEPAD);
     gamepad_panel_draw(&app->panels.gamepad, &app->input);
   }
   if (app->show_about) {
+    ProfScope prof_scope(&app->profiler, PS_ABOUT);
     about_panel_draw(&app->show_about, app->window_ctx.window,
                      app->window_ctx.renderer);
   }
-  if (app->show_imgui_demo) {
-    ImGui::ShowDemoWindow(&app->show_imgui_demo);
+  if (app->show_imgui_demo || app->show_implot_demo) {
+    ProfScope prof_scope(&app->profiler, PS_DEMOS);
+    if (app->show_imgui_demo) {
+      ImGui::ShowDemoWindow(&app->show_imgui_demo);
+    }
+    if (app->show_implot_demo) {
+      ImPlot::ShowDemoWindow(&app->show_implot_demo);
+    }
   }
-  if (app->show_implot_demo) {
-    ImPlot::ShowDemoWindow(&app->show_implot_demo);
+  if (app->show_profiler) {
+    ProfScope prof_scope(&app->profiler, PS_PROFILER);
+    ProfilerPanelInfo info = {};
+    info.first_panel_stage = PS_FIRST_PANEL;
+    info.physics_stage = PS_PHYSICS;
+    info.shadow_stage = PS_SHADOW;
+    info.ui_stage = PS_UI;
+    info.render_stage = PS_RENDER;
+    info.present_stage = PS_PRESENT;
+    info.steps_counter = PC_STEPS;
+    info.substeps_counter = PC_SUBSTEPS;
+    info.shadow_steps_counter = PC_SHADOW_STEPS;
+    info.sim_s_counter = PC_SIM_S;
+    info.target_frame_ms = display_refresh_ms(app->window_ctx.window);
+    info.sim_speed = sim_clock_speed(&app->clock);
+    info.sim_paused = app->clock.paused;
+    info.shadow_active = app->sync.engine_config.ecu_fitted != 0;
+    profiler_panel_draw(&app->show_profiler, &app->profiler, info);
   }
   /* Pause / speed can change from the panel or a hotkey; log it either way. */
   if (app->clock.paused != app->logged_paused) {
@@ -1149,13 +1313,20 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                    "sim speed %.2gx", sim_clock_speed(&app->clock));
   }
 
+  profiler_end(&app->profiler, PS_UI, prof_now());
+
+  profiler_begin(&app->profiler, PS_RENDER, prof_now());
   ImGui::Render();
 
   SDL_SetRenderDrawColor(renderer, 10, 14, 12, SDL_ALPHA_OPAQUE);
   SDL_RenderClear(renderer);
 
   ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+  profiler_end(&app->profiler, PS_RENDER, prof_now());
+
+  profiler_begin(&app->profiler, PS_PRESENT, prof_now());
   SDL_RenderPresent(renderer);
+  profiler_end(&app->profiler, PS_PRESENT, prof_now());
 
   return app->quit_requested ? SDL_APP_SUCCESS : SDL_APP_CONTINUE;
 }

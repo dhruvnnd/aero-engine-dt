@@ -40,6 +40,7 @@ set(ENGINE_CORE_TESTS
   test_ecu_compare
   test_engine_faults
   test_pv_diagram
+  test_profiler
   test_run_log
 )
 

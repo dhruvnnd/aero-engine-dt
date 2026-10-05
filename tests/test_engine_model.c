@@ -844,8 +844,41 @@ static void test_closed_throttle_map_scales_with_ambient(void) {
   CHECK_NEAR(ratio_alt, ratio_sl, 0.06);
 }
 
+/* engine_model_step() reports how many crank sub-steps it took (the
+ * performance profiler's cost measure): more with a longer step, none while
+ * the engine is stopped. */
+static void test_reports_crank_substeps(void) {
+  EngineConfig cfg = engine_config_default();
+  EngineState st;
+  CylinderState cyl_states[ENGINE_MAX_CYLINDERS];
+  CylinderConfig cyl[ENGINE_MAX_CYLINDERS];
+  for (int i = 0; i < ENGINE_MAX_CYLINDERS; i++) {
+    cyl[i] = cylinder_config_default();
+  }
+  init_cyl_states(cyl_states);
+  FuelConfig fuel_cfg = fuel_config_default();
+  engine_model_init(&st, &cfg);
+  CHECK(st.substeps == 0);
+
+  EngineInput in = make_input(0.5, 10.0, 101.325);
+  engine_model_step(&st, &cfg, &in, &fuel_cfg, cyl, cyl_states,
+                    TEST_INTAKE_TEMP_C, 0.0, 0.01);
+  const int short_step = st.substeps;
+  CHECK(short_step > 0);
+
+  engine_model_step(&st, &cfg, &in, &fuel_cfg, cyl, cyl_states,
+                    TEST_INTAKE_TEMP_C, 0.01, 0.04);
+  CHECK(st.substeps > short_step * 2);
+
+  st.run_state = ENGINE_STOPPED;
+  engine_model_step(&st, &cfg, &in, &fuel_cfg, cyl, cyl_states,
+                    TEST_INTAKE_TEMP_C, 0.05, 0.02);
+  CHECK(st.substeps == 0);
+}
+
 static const TestCase CASES[] = {
     {"engine_model.init_is_cold_idle", test_init_is_cold_idle},
+    {"engine_model.reports_crank_substeps", test_reports_crank_substeps},
     {"engine_model.config_defaults_are_positive",
      test_config_defaults_are_positive},
     {"engine_model.wot_settles_to_plausible_steady_state",

@@ -48,6 +48,8 @@ typedef struct {
   CylinderThermalInput cyl_thermal[ENGINE_MAX_CYLINDERS];
   double friction_w;
 
+  int substeps;
+
   EngineTrace *trace;
 } EngineState;
 

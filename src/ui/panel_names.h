@@ -27,5 +27,6 @@
 #define PANEL_EVENT_LOG "Event Log"
 #define PANEL_GAMEPAD "Gamepad / Input Map"
 #define PANEL_ABOUT "About"
+#define PANEL_PROFILER "Performance"
 
 #endif /* UI_PANEL_NAMES_H */

@@ -240,6 +240,7 @@ void engine_model_init(EngineState *state, const EngineConfig *config) {
     state->cyl_thermal[i].blowdown_c = 20.0;
   }
   state->friction_w = 0.0;
+  state->substeps = 0;
   state->trace = NULL;
 }
 
@@ -283,6 +284,7 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
                        const CylinderConfig *cylinders,
                        CylinderState *cyl_states, double intake_temp_c,
                        double t, double dt) {
+  state->substeps = 0;
   if (state->run_state == ENGINE_STOPPED) {
     state->torque_nm = 0.0;
     /* nothing is pumping the manifold any more: it equalises with ambient, so
@@ -442,6 +444,7 @@ void engine_model_step(EngineState *state, const EngineConfig *config,
   state->map_kpa = vec[ENGINE_STATE_MAP];
   state->theta_deg = crank_wrap720_deg(vec[ENGINE_STATE_THETA]);
   state->torque_nm = substeps > 0 ? torque_accum / substeps : 0.0;
+  state->substeps = substeps;
   if (stalled) {
     state->run_state = ENGINE_STOPPED;
   } else if (was_cranking &&
